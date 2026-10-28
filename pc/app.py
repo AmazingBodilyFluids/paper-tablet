@@ -158,6 +158,9 @@ class Api:
         path = os.path.normpath(os.path.join(HERE, "..", "tablet", "calibration-landscape.pdf"))
         if sys.platform == "win32":
             os.startfile(os.path.dirname(path))  # noqa: S606 (opens the folder in Explorer)
+        elif sys.platform.startswith("linux"):
+            import subprocess
+            subprocess.Popen(["xdg-open", os.path.dirname(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return path
 
     def open_url(self, url):
@@ -221,6 +224,15 @@ def already_running():
     """One Paper Tablet at a time: two would mean two synthetic pens fighting over the cursor.
     A named mutex says whether another copy owns it; if so, ask it to show its window (it may be
     hidden in the tray), or bring an older copy's window forward."""
+    if sys.platform.startswith("linux"):
+        import fcntl
+        import paths
+        main.lock = open(os.path.join(paths.data_dir(), "running.lock"), "w")  # held until exit
+        try:
+            fcntl.flock(main.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return False
+        except OSError:
+            return True
     if sys.platform != "win32":
         return False
     import ctypes
@@ -244,14 +256,17 @@ def main():
         return
     api = Api()
     theme = saved_theme()
-    splash = webview.create_window(SPLASH_TITLE, os.path.join(HERE, "web", "splash.html"),
+    # No splash on Linux: tiling compositors (Hyprland, Sway) would tile it like any window.
+    use_splash = sys.platform == "win32"
+    splash = None if not use_splash else webview.create_window(SPLASH_TITLE, os.path.join(HERE, "web", "splash.html"),
                                    width=560, height=340, frameless=True, easy_drag=False,
                                    on_top=True, background_color=THEME_BG[theme], resizable=False)
     window = webview.create_window(MAIN_TITLE, os.path.join(HERE, "web", "index.html"), js_api=api,
                                    width=1240, height=820, min_size=(900, 600),
                                    frameless=True, easy_drag=False, hidden=True, background_color=THEME_BG[theme])
-    splash.events.shown += lambda: place_window(SPLASH_TITLE, 560, 340)
-    splash.events.loaded += lambda: splash.evaluate_js(f"document.documentElement.dataset.theme = {json.dumps(theme)}")
+    if splash:
+        splash.events.shown += lambda: place_window(SPLASH_TITLE, 560, 340)
+        splash.events.loaded += lambda: splash.evaluate_js(f"document.documentElement.dataset.theme = {json.dumps(theme)}")
     api._window = window
     t0 = time.time()
 
@@ -285,20 +300,21 @@ def main():
         api._ready.set()
         # Let the splash animation play to its end (the page reports it), then fade it out
         # before the main window appears, instead of cutting it off at a fixed time.
-        time.sleep(max(0.0, SPLASH_MIN_S - (time.time() - t0)))
-        while time.time() - t0 < SPLASH_MAX_S:
+        time.sleep(max(0.0, SPLASH_MIN_S - (time.time() - t0)) if splash else 0)
+        while splash and time.time() - t0 < SPLASH_MAX_S:
             try:
                 if splash.evaluate_js("window.splashDone === true"):
                     break
             except Exception:
                 break
             time.sleep(0.05)
-        time.sleep(0.2)  # a beat on the finished logo
-        try:
-            splash.evaluate_js("fadeOut()")
-            time.sleep(0.4)
-        except Exception:
-            pass
+        if splash:
+            time.sleep(0.2)  # a beat on the finished logo
+            try:
+                splash.evaluate_js("fadeOut()")
+                time.sleep(0.4)
+            except Exception:
+                pass
         place_window(MAIN_TITLE, 1240, 820)  # while still hidden, so it never shows at the wrong size
         window.show()
         place_window(MAIN_TITLE, 1240, 820)
@@ -306,7 +322,8 @@ def main():
             start_tray()
         notify()
         try:
-            splash.destroy()
+            if splash:
+                splash.destroy()
         except Exception:
             pass
 

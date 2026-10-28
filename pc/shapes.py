@@ -8,6 +8,7 @@ app (Ctrl+Z) and draws the clean shape as a new pen stroke with the stroke's own
 No numpy: strokes are a few hundred points.
 """
 import math
+import sys
 import time
 
 from rmtablet import Frame, PANEL_MM, _solve
@@ -397,11 +398,19 @@ def recognize(stroke, step=1.0):
 DRAWING_APPS = ("photoshop", "krita", "clipstudiopaint", "illustrator", "mspaint", "sai", "gimp",
                 "inkscape", "firealpaca", "medibang", "artrage", "rebelle", "affinity", "photo",
                 "designer", "paintdotnet", "onenote", "xournal", "openboard", "fresco", "aseprite",
-                "procreate", "infinitepainter", "corelpainter", "painter", "blender", "zbrush")
+                "procreate", "infinitepainter", "corelpainter", "painter", "blender", "zbrush",
+                "mypaint", "rnote", "pinta", "kolourpaint", "opentoonz", "azpainter", "drawing")
 
 
 def foreground_app():
-    """Executable name (lower case, no .exe) of the foreground window, or "" if unknown."""
+    """Executable name (lower case, no .exe) of the foreground window, or "" if unknown.
+    Linux: the focused window's app class from the compositor (e.g. "krita", "gimp")."""
+    if sys.platform.startswith("linux"):
+        try:
+            import linuxinput
+            return linuxinput.active_window()[0]
+        except Exception:
+            return ""
     try:
         import ctypes
         from ctypes import wintypes as wt

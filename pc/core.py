@@ -476,7 +476,7 @@ class Engine:
         self.peak = 0
         self.snap_last = None  # last snap or skip, for the UI
         self.keys = keys.Keys()
-        self.mouse = keys.Mouse()
+        self.mouse = keys.make_mouse()
         self.pan_space = False
         self.last_action = None
         self.rate = RateMeter()
@@ -905,6 +905,19 @@ class Engine:
         return bool(self.cfg["grab"]) or self.cal is not None
 
     def make_pen(self):
+        if sys.platform.startswith("linux"):
+            import linuxinput
+            if not linuxinput.available():
+                self.output_on = False
+                self.set_status("error", "No access to /dev/uinput, so the pen can't be created. "
+                                "Run linux/setup.sh once (it adds a udev rule), then log out and back in.")
+                return None
+            try:
+                return linuxinput.LinuxPen()
+            except Exception as ex:
+                self.output_on = False
+                self.set_status("error", f"Couldn't create the virtual pen: {ex}")
+                return None
         if sys.platform != "win32":
             return NullPen()
         try:

@@ -66,6 +66,7 @@ class Keys:
         self.held = set()
         self.lock = threading.Lock()
         self._send = send or self._keybd
+        self._linux = send is None and sys.platform.startswith("linux")
 
     @staticmethod
     def _keybd(vk, up, ext=False):
@@ -75,7 +76,10 @@ class Keys:
         ctypes.windll.user32.keybd_event(vk, 0, (KEYUP if up else 0) | (EXTKEY if ext else 0), 0)
 
     def _key(self, name, up):
-        if name in EXTENDED:
+        if self._linux:
+            import linuxinput
+            linuxinput.devices().key(name, up)
+        elif name in EXTENDED:
             self._send(VK[name], up, True)
         else:
             self._send(VK[name], up)
@@ -184,9 +188,51 @@ class Mouse:
             self.start = None
 
 
+class LinuxMouse(Mouse):
+    """The same drags through the virtual absolute mouse (linuxinput)."""
+
+    def __init__(self):
+        import linuxinput
+        self.dev = linuxinput.devices()
+        super().__init__(send=lambda *a: None, cursor=linuxinput.cursor_pos)
+
+    def begin(self):
+        self.start = self._cursor()
+        self.dev.move(*self.start)
+        self.dev.button(True)
+
+    def goto(self, x, y):
+        self.dev.move(x, y)
+
+    def begin_at(self, x, y):
+        self.dev.move(x, y)
+        self.start = (x, y)
+        self.dev.button(True)
+
+    def move(self, dx, dy):
+        if self.start is not None:
+            self.dev.move(self.start[0] + dx, self.start[1] + dy)
+
+    def end(self):
+        if self.start is not None:
+            self.dev.button(False)
+            self.start = None
+
+
+def make_mouse():
+    return LinuxMouse() if sys.platform.startswith("linux") else Mouse()
+
+
 def foreground_center():
     """Centre of the focused window in screen pixels: the pivot for the rotate drag (drawing
     apps rotate the view around the middle of their window)."""
+    if sys.platform.startswith("linux"):
+        import linuxinput
+        c = linuxinput.active_window()[1]
+        if c:
+            return c
+        l, t, r, b = linuxinput.layout_box()
+        return (l + r) // 2, (t + b) // 2
     if sys.platform != "win32":
         return 960, 540
     import ctypes

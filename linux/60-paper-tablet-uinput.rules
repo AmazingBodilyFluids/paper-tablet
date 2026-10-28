@@ -1,0 +1,3 @@
+# Paper Tablet: let the logged-in user create virtual input devices (the pen, keys and mouse).
+# Same rule Steam ships for its controllers.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

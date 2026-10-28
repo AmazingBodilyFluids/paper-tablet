@@ -47,7 +47,7 @@ handle undo, redo, pan and zoom.
 ## Requirements
 
 - A **reMarkable Paper Pro** with **developer mode** turned on. Tested on software 3.29.
-- **Windows 10 (1809 or newer) or Windows 11**, and the USB-C cable.
+- **Windows 10 (1809 or newer) or Windows 11**, and the USB-C cable. Linux: preview, see below.
 - The installer and portable version bring everything else with them. Running from source needs Python 3.10+.
 
 ## Install
@@ -62,6 +62,9 @@ Download from [Releases](../../releases):
 
 The builds aren't code-signed yet, so Windows SmartScreen may warn the first time you run them
 (*More info → Run anyway*).
+
+**Linux (preview, first build):** see [linux/README-linux.md](linux/README-linux.md). It installs with one
+script and uses a virtual tablet device, so it works on Wayland (Hyprland, Sway, GNOME, KDE).
 
 **From source:** clone this repo and double-click `Paper Tablet.bat`. It installs `paramiko` and `pywebview`
 once, then starts the app.

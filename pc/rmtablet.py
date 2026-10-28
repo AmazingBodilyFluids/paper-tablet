@@ -644,7 +644,11 @@ class PrintPen:
 
 
 def monitors():
-    """Monitor rectangles in physical pixels, primary first."""
+    """Monitor rectangles in physical pixels, primary first (Linux: the compositor's logical
+    layout, see linuxinput)."""
+    if sys.platform.startswith("linux"):
+        import linuxinput
+        return linuxinput.monitors()
     if sys.platform != "win32":
         return [(0, 0, 1920, 1080)]
     from ctypes import wintypes as wt
