@@ -54,6 +54,8 @@ Log out and back in once afterwards. Then start Paper Tablet from the launcher, 
 - **The pen lands in the wrong place (Hyprland).** The app maps the tablet across all monitors itself, so
   leave Hyprland's `input:tablet:output` and `region_*` options unset. Choose the display on the app's
   *Screen area* page instead.
+- **Krita doesn't react to the pen (Wayland).** Krita's native Wayland mode can ignore a virtual tablet.
+  Start it through XWayland instead: `QT_QPA_PLATFORM=xcb krita`. Other Qt drawing apps may need the same.
 - **The rotate gesture.** Rotate needs the app's own rotate-view key, set on *Panel & gestures*:
   `shift+space` for Krita, `r` for apps that use R.
 
