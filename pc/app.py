@@ -6,6 +6,7 @@ The window is an HTML interface in web/; everything it does goes through Api bel
 headless Engine in core.py. A small splash window shows while the engine starts.
 Needs: Python 3.10+, `pip install -r requirements.txt` (paramiko, pywebview).
 """
+import json
 import os
 import sys
 import threading
@@ -34,11 +35,25 @@ from version import __version__  # noqa: E402
 
 CONFIG = use_profile_config()
 
+if sys.platform == "win32":
+    import winextras
+
 BG = "#060e17"
+# Window background per theme (web/themes.css), shown before the page has painted
+THEME_BG = {"default": BG, "graphite": "#101215", "ledger": "#f4f1e8", "intaglio": "#0e1a15"}
 SPLASH_MIN_S = 2.6
 SPLASH_MAX_S = 7.0  # give up waiting for the splash animation after this
 MAIN_TITLE = "Paper Tablet"
 SPLASH_TITLE = "Paper Tablet starting"
+
+
+def saved_theme():
+    try:
+        with open(CONFIG, encoding="utf-8") as f:
+            theme = json.load(f).get("gui", {}).get("theme")
+    except (OSError, ValueError):
+        theme = None
+    return theme if theme in THEME_BG else "default"
 
 
 def place_window(title, width, height):
@@ -76,6 +91,11 @@ class Api:
     def __init__(self):
         self._engine = None
         self._window = None
+        self._tray = None
+        self._resizer = winextras.Resizer(900, 600) if sys.platform == "win32" else None
+        self._quitting = False
+        self._closing = False
+        self._told_tray = False
         self._ready = threading.Event()
 
     # ---- state
@@ -94,6 +114,8 @@ class Api:
     # ---- settings and actions
     def set(self, key, value):
         self._engine.set(key, value)
+        if key == "theme" and self._tray:
+            self._tray.back_color(THEME_BG.get(value, BG))
         return True
 
     def connect(self):
@@ -155,14 +177,50 @@ class Api:
         else:
             w.maximize()
             self._maxed = True
+        return self._maxed
 
     def win_close(self):
+        self._window.destroy()  # on_closing decides between the tray and quitting
+
+    # The window has no frame, so the page's edge grips resize it (winextras.Resizer)
+    def resize_start(self, edge):
+        if self._resizer:
+            self._resizer.start(str(edge))
+
+    def resize_move(self):
+        if self._resizer:
+            self._resizer.move()
+
+    def resize_end(self):
+        if self._resizer:
+            self._resizer.end()
+
+    # ---- tray
+    def _toggle_pen(self):
+        if self._engine:
+            self._engine.set_output(not self._engine.output_on)
+
+    def _exit(self):
+        self._quitting = True
         self._window.destroy()
+
+    def _to_tray(self):
+        """Close button with "close to tray" on: hide instead of quitting. True if it did."""
+        if (self._quitting or not self._tray or not self._engine or not self._engine.cfg.get("close_to_tray")
+                or not winextras.user_closing(self._window.native)):
+            return False
+        self._window.hide()
+        if not self._told_tray:
+            self._told_tray = True
+            self._tray.balloon("Paper Tablet is still running",
+                               "It stays in the tray so the pen keeps working. Right-click the icon to exit.")
+        return True
 
 
 def already_running():
     """One Paper Tablet at a time: two would mean two synthetic pens fighting over the cursor.
-    A named mutex says whether another copy owns it; if so, bring that window forward."""
+    A named mutex says whether another copy owns it; if so, ask it to show its window (it may be
+    hidden in the tray), or bring an older copy's window forward."""
     if sys.platform != "win32":
         return False
     import ctypes
@@ -171,6 +229,8 @@ def already_running():
     main.mutex = k.CreateMutexW(None, False, "Local\\PaperTablet.SingleInstance")  # held until exit
     if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
         return False
+    if winextras.signal_show():
+        return True
     hwnd = u.FindWindowW(None, MAIN_TITLE)
     if hwnd:
         u.ShowWindow(hwnd, 9)  # SW_RESTORE
@@ -183,21 +243,38 @@ def main():
         print("Paper Tablet is already running; brought it to the front.", flush=True)
         return
     api = Api()
+    theme = saved_theme()
     splash = webview.create_window(SPLASH_TITLE, os.path.join(HERE, "web", "splash.html"),
                                    width=560, height=340, frameless=True, easy_drag=False,
-                                   on_top=True, background_color=BG, resizable=False)
+                                   on_top=True, background_color=THEME_BG[theme], resizable=False)
     window = webview.create_window(MAIN_TITLE, os.path.join(HERE, "web", "index.html"), js_api=api,
                                    width=1240, height=820, min_size=(900, 600),
-                                   frameless=True, easy_drag=False, hidden=True, background_color=BG)
+                                   frameless=True, easy_drag=False, hidden=True, background_color=THEME_BG[theme])
     splash.events.shown += lambda: place_window(SPLASH_TITLE, 560, 340)
+    splash.events.loaded += lambda: splash.evaluate_js(f"document.documentElement.dataset.theme = {json.dumps(theme)}")
     api._window = window
     t0 = time.time()
 
     def notify():
+        if api._closing:
+            return  # the page is going away; the engine's last "disconnected" has nowhere to go
+        if api._tray and api._engine:
+            api._tray.update(api._engine.connected, api._engine.output_on)
         try:
             window.evaluate_js("window.onEngineChange && window.onEngineChange()")
         except Exception:
             pass
+
+    def start_tray():
+        try:
+            api._tray = winextras.Tray(window.native, on_open=lambda: api._tray.show_window(),
+                                       on_toggle=api._toggle_pen, on_exit=api._exit)
+            api._resizer.hwnd = api._tray.hwnd
+            winextras.listen_for_show(lambda: api._tray.call(api._tray.show_window))
+        except Exception as ex:  # the app still works without a tray icon; it just quits on close
+            print("tray icon failed:", repr(ex), flush=True)
+            import ctypes
+            api._resizer.hwnd = ctypes.windll.user32.FindWindowW(None, MAIN_TITLE)
 
     def boot():
         try:
@@ -225,6 +302,8 @@ def main():
         place_window(MAIN_TITLE, 1240, 820)  # while still hidden, so it never shows at the wrong size
         window.show()
         place_window(MAIN_TITLE, 1240, 820)
+        if sys.platform == "win32":
+            start_tray()
         notify()
         try:
             splash.destroy()
@@ -232,8 +311,14 @@ def main():
             pass
 
     def on_closing():
+        if api._to_tray():
+            return False  # cancels the close
+        api._closing = True
+        tray, api._tray = api._tray, None
         if api._engine:
             api._engine.shutdown()
+        if tray:
+            tray.dispose()
 
     window.events.closing += on_closing
     webview.start(boot, debug="--debug" in sys.argv)

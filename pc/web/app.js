@@ -105,6 +105,8 @@ function render() {
   $("#swScreen2").disabled = !S.connected;
   $("#scrState").textContent = S.screen ? "On. The notebook app is paused." : (S.connected ? "Off" : "Connect the tablet first");
 
+  if (Date.now() > themeHold) applyTheme(S.cfg.theme || "default");
+
   // bound settings
   for (const el of $$("[data-key]")) {
     const k = el.dataset.key, v = S.cfg[k];
@@ -242,10 +244,72 @@ function go(v) {
 }
 for (const n of $$(".nav[data-view]")) n.onclick = () => go(n.dataset.view);
 
+// ------------------------------------------------------------------ theme (title bar switcher, web/themes.css)
+
+// [key, name, swatch background, swatch accent]
+const THEMES = [["default", "Paper Tablet", "#060e17", "#C4A882"], ["graphite", "Graphite", "#101215", "#d8bb8a"],
+                ["ledger", "Ledger", "#f4f1e8", "#1f5c45"], ["intaglio", "Intaglio", "#0e1a15", "#cfb57a"]];
+let theme = null;
+let themeHold = 0;  // after a click, ignore snapshots taken before the new theme was saved
+
+function applyTheme(t) {
+  if (t === theme) return;
+  theme = t;
+  document.documentElement.dataset.theme = t;
+  for (const b of $$("#themes button")) {
+    b.classList.toggle("on", b.dataset.theme === t);
+    b.setAttribute("aria-checked", b.dataset.theme === t);
+  }
+  themeColors();
+  requestAnimationFrame(() => { drawStatic(); drawCurve(); Panel.sig = ""; if (S) Panel.render(); });
+}
+$("#themes").innerHTML = THEMES.map(([k, name, bg, acc]) =>
+  `<button role="radio" data-theme="${k}" title="${name}" aria-label="${name} theme" style="--sw-bg:${bg};--sw-acc:${acc}"></button>`).join("");
+for (const b of $$("#themes button")) b.onclick = () => {
+  themeHold = Date.now() + 1500;
+  applyTheme(b.dataset.theme);
+  api().set("theme", b.dataset.theme);
+};
+
+// ------------------------------------------------------------------ window edges and maximise
+
+// The window has no frame, so grips along its edges resize it: Python reads the real cursor on
+// each move (winextras.Resizer). One call in flight at a time; resize_end makes the last move.
+for (const g of $$(".grips i")) g.onmousedown = async e => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  let busy = false;
+  const move = async () => {
+    if (busy) return;
+    busy = true;
+    await api().resize_move();
+    busy = false;
+  };
+  const up = () => {
+    removeEventListener("mousemove", move);
+    removeEventListener("mouseup", up);
+    api().resize_end();
+  };
+  addEventListener("mousemove", move);
+  addEventListener("mouseup", up);
+  await api().resize_start(g.dataset.edge);
+};
+async function toggleMax() {
+  document.documentElement.classList.toggle("maxed", await api().win_toggle_max());
+}
+
 // ------------------------------------------------------------------ tablet preview canvases
 
+// The tablet's body and paper screen keep their own colours; the rest follows the theme (themeColors).
 const C = { bg: "#060e17", body: "#0f1d2c", screen: "#e9e6dc", screenEdge: "#23364a", used: "rgba(74,158,224,0.28)",
-            usedEdge: "#4A9EE0", area: "#C4A882", pen: "#4A9EE0", down: "#e5484d", eraser: "#ff9d52", text: "rgba(255,255,255,0.5)" };
+            usedEdge: "#4A9EE0", area: "#C4A882", pen: "#4A9EE0", down: "#e5484d", eraser: "#ff9d52", text: "rgba(255,255,255,0.5)",
+            grid: "rgba(255,255,255,0.06)", frame: "rgba(196,168,130,0.18)", marker: "#fff" };
+
+function themeColors() {
+  const css = getComputedStyle(document.documentElement), v = n => css.getPropertyValue(n).trim();
+  Object.assign(C, { bg: v("--bg"), used: v("--accent2-b"), usedEdge: v("--accent2"), area: v("--accent"), pen: v("--accent2"),
+                     text: v("--dim2"), grid: v("--border2"), frame: v("--accent-b"), marker: v("--ink") });
+}
 
 function fitCanvas(cv) {
   const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
@@ -278,7 +342,7 @@ function drawTablet(cv) {
   const f = frameRect(w, h);
   roundRect(ctx, f.x - 14, f.y - 14, f.w + 28, f.h + 28, 14);
   ctx.fillStyle = C.body; ctx.fill();
-  ctx.strokeStyle = "rgba(196,168,130,0.18)"; ctx.lineWidth = 1; ctx.stroke();
+  ctx.strokeStyle = C.frame; ctx.lineWidth = 1; ctx.stroke();
   ctx.fillStyle = C.screen; ctx.fillRect(f.x, f.y, f.w, f.h);
   const u = S.used, cl = v => Math.min(1, Math.max(0, v));
   ctx.fillStyle = C.used;
@@ -367,15 +431,15 @@ function drawCurve(marker) {
   const [ctx, w, h] = fitCanvas(cv);
   const pad = 26, W = w - 2 * pad, H = h - 2 * pad, max = S.pressure_max;
   ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.lineWidth = 1;
+  ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     ctx.beginPath(); ctx.moveTo(pad, pad + H * i / 4); ctx.lineTo(pad + W, pad + H * i / 4); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(pad + W * i / 4, pad); ctx.lineTo(pad + W * i / 4, pad + H); ctx.stroke();
   }
-  ctx.setLineDash([3, 4]); ctx.strokeStyle = "rgba(255,255,255,0.18)";
-  ctx.beginPath(); ctx.moveTo(pad, pad + H); ctx.lineTo(pad + W, pad); ctx.stroke(); ctx.setLineDash([]);
+  ctx.setLineDash([3, 4]); ctx.strokeStyle = C.text; ctx.globalAlpha = 0.45;
+  ctx.beginPath(); ctx.moveTo(pad, pad + H); ctx.lineTo(pad + W, pad); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
   const grad = ctx.createLinearGradient(pad, 0, pad + W, 0);
-  grad.addColorStop(0, "#4A9EE0"); grad.addColorStop(1, "#C4A882");
+  grad.addColorStop(0, C.pen); grad.addColorStop(1, C.area);
   ctx.strokeStyle = grad; ctx.lineWidth = 2.5; ctx.beginPath();
   for (let i = 0; i <= 200; i++) {
     const raw = max * i / 200, x = pad + W * i / 200, y = pad + H - H * pressureOut(raw) / 1024;
@@ -387,7 +451,7 @@ function drawCurve(marker) {
   ctx.save(); ctx.translate(11, pad + H); ctx.rotate(-Math.PI / 2); ctx.fillText("SENT TO APPS →", 0, 0); ctx.restore();
   if (marker != null) {
     const x = pad + W * marker / max, y = pad + H - H * pressureOut(marker) / 1024;
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.marker; ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill();
   }
 }
 
@@ -403,10 +467,10 @@ const DESK = [
 ];
 function deskSvg(turn) {
   return `<svg viewBox="0 0 110 96" fill="none" stroke-linecap="round"><g transform="rotate(${turn} 55 48)">
-    <rect x="32" y="15" width="46" height="62" rx="4" fill="#0f1d2c" stroke="#C4A882" stroke-width="1.4"/>
+    <rect x="32" y="15" width="46" height="62" rx="4" fill="#0f1d2c" style="stroke:var(--accent)" stroke-width="1.4"/>
     <rect x="37.5" y="20.5" width="35" height="51" fill="#e9e6dc" opacity=".9"/>
-    <rect x="37" y="10.5" width="11" height="4" rx="1.2" fill="#4A9EE0"/>
-    <rect x="39.5" y="77" width="6" height="5" rx="1" fill="#e8e2d6"/><path d="M42.5 82c0 5 3 6 3 12" stroke="#e8e2d6" stroke-width="1.8"/>
+    <rect x="37" y="10.5" width="11" height="4" rx="1.2" style="fill:var(--accent2)"/>
+    <rect x="39.5" y="77" width="6" height="5" rx="1" style="fill:var(--dim)"/><path d="M42.5 82c0 5 3 6 3 12" style="stroke:var(--dim)" stroke-width="1.8"/>
   </g></svg>`;
 }
 function renderPositions(box) {
@@ -455,7 +519,7 @@ function renderCalibration() {
   $("#posWarn").innerHTML = positionWarning();
   const tall = S.position === "portrait" || S.position === "portrait-flipped";
   const svg = $("#calSvg"), W = tall ? 190 : 340, H = tall ? 254 : 255, x0 = (400 - W) / 2, y0 = 22;
-  let out = `<rect x="${x0 - 12}" y="${y0 - 12}" width="${W + 24}" height="${H + 24}" rx="12" fill="#0f1d2c" stroke="rgba(196,168,130,.2)"/>` +
+  let out = `<rect x="${x0 - 12}" y="${y0 - 12}" width="${W + 24}" height="${H + 24}" rx="12" fill="#0f1d2c" style="stroke:var(--accent-b)"/>` +
             `<rect x="${x0}" y="${y0}" width="${W}" height="${H}" fill="#e9e6dc"/>`;
   tg.forEach((t, i) => {
     const x = x0 + t.uv[0] * W, y = y0 + t.uv[1] * H;
@@ -547,11 +611,11 @@ const Wizard = {
         <div class="lbl">Welcome</div><h1 class="mt">Turn your Paper Pro into a drawing tablet</h1>
         <p class="lead">Your reMarkable becomes a pen tablet for Windows, with pressure, tilt and the eraser end, and it shows what you draw on its own screen. This guide takes about 15 minutes, once.</p>
         <div class="illus"><svg viewBox="0 0 300 140" fill="none" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="8" y="30" width="120" height="86" rx="7" stroke="#C4A882" stroke-width="1.5"/><rect x="18" y="38" width="100" height="70" fill="rgba(196,168,130,.06)"/>
-          <path d="M30 92c14-26 24-26 32-10s18 16 32-14" stroke="#e8e2d6" stroke-width="2"/>
-          <path d="M136 73h40" stroke="#4A9EE0" stroke-width="1.5" stroke-dasharray="4 4"/>
-          <rect x="184" y="20" width="108" height="72" rx="4" stroke="#4A9EE0" stroke-width="1.5"/><path d="M226 92v14M212 108h30" stroke="#4A9EE0" stroke-width="1.5"/>
-          <path d="M200 68c14-26 24-26 32-10s18 16 32-14" stroke="#4A9EE0" stroke-width="2"/></svg></div>
+          <rect x="8" y="30" width="120" height="86" rx="7" style="stroke:var(--accent)" stroke-width="1.5"/><rect x="18" y="38" width="100" height="70" style="fill:var(--accent-d)"/>
+          <path d="M30 92c14-26 24-26 32-10s18 16 32-14" style="stroke:var(--text)" stroke-width="2"/>
+          <path d="M136 73h40" style="stroke:var(--accent2)" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <rect x="184" y="20" width="108" height="72" rx="4" style="stroke:var(--accent2)" stroke-width="1.5"/><path d="M226 92v14M212 108h30" style="stroke:var(--accent2)" stroke-width="1.5"/>
+          <path d="M200 68c14-26 24-26 32-10s18 16 32-14" style="stroke:var(--accent2)" stroke-width="2"/></svg></div>
         <div class="pane-title mt">You'll need</div>
         <ol class="steps"><li><div>The tablet, charged, and its USB-C cable</div></li><li><div>Your reMarkable account, for the backup</div></li><li><div>About 15 minutes</div></li></ol>`;
       case 1: return `
