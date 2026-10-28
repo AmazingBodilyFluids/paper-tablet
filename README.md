@@ -32,7 +32,7 @@ handle undo, redo, pan and zoom.
   The panel folds away from its corner tab when you want the whole surface.
 - **Finger gestures:**
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
-  - Two-finger drag to pan and pinch to zoom.
+  - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.
   - Tap gestures you can assign (one-finger triple tap = new layer by default).
 
   Fingers are ignored while the pen is near the screen, so a resting hand does nothing.
@@ -107,6 +107,7 @@ After that, plugging in is all it takes.
 | 3 fingers, swipe left / right | Undo / redo. One step per ~11 mm of swipe, live, and dragging back takes steps back (Short / Medium / Long) |
 | 2 fingers, drag | Pan (holds Space and drags, like the hand tool) |
 | 2 fingers, pinch | Zoom in / out (Ctrl+= / Ctrl+-) |
+| 5 fingers, twist | Rotate the canvas (holds R and drags round the window centre; Shift+Space for Krita / Clip Studio) |
 | 1 finger, triple tap | New layer (Ctrl+Shift+Alt+N), changeable |
 | 1-finger double tap, 2-finger tap and double tap, 3-finger tap | Off until you assign keys |
 

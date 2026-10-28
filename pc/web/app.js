@@ -835,7 +835,7 @@ const Panel = {
         <div class="pm-status" style="left:${px(22)};top:${px(T + 22)};width:${px(W - 44)};font-size:${px(21)}">Pen on · Photoshop</div>
         ${cells}
         <div class="pm-foot" style="left:${px(22)};top:${px(vh - this.FOOT + 18)};width:${px(W - 44)};font-size:${px(19)}">${S.cfg.gestures ?
-          "3 fingers swipe left: undo, right: redo (further = more)<br>2 fingers: drag to pan, pinch to zoom" : "Power button: back to notebooks"}</div>
+          "3 fingers swipe: left undo, right redo<br>2 fingers: pan, pinch to zoom<br>5 fingers: twist to rotate" : "Power button: back to notebooks"}</div>
       </div>`;
     const tab = `<div class="pm-tab" title="Folds the panel away" style="${right ? "right:0" : "left:0"};width:${px(T)};height:${px(T)};border-width:${px(3)}">${chev}</div>`;
     const sw = W + 260;

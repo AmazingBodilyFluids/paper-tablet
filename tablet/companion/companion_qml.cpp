@@ -221,9 +221,12 @@ Window {
     // ---- finger gestures on the drawing area
     //   two fingers: drag = pan (the PC holds Space and drags), pinch = zoom in / out
     //   three fingers: swipe right-to-left = undo, left-to-right = redo
-    // Ignored while the pen is near the screen (that's a resting hand) and with 4+ fingers.
+    //   five fingers: twist = rotate the canvas (the PC holds the rotate key and drags in a circle)
+    // Ignored while the pen is near the screen (that's a resting hand) and with 6+ fingers.
     property var gPts: ({})        // pointId -> {x, y}
-    property string gMode: ""      // "" | pan | pinch | three | dead
+    property string gMode: ""      // "" | pan | pinch | three | five | rotate | dead
+    property var gAng0: ({})       // five fingers: pointId -> angle around the centroid at the start
+    property real gRotSent: 0      // degrees last sent
     property int gMax: 0
     property real gD0: 0           // finger distance when the second finger landed
     property real gDLast: 0        // distance at the last zoom step
@@ -247,8 +250,25 @@ Window {
         return {x: x / l.length, y: y / l.length}
     }
     function spread(l) { return Math.sqrt(Math.pow(l[0].x - l[1].x, 2) + Math.pow(l[0].y - l[1].y, 2)) }
+    function fingerAngles(l, ids) {
+        var c = centroid(l), out = {}
+        for (var i = 0; i < ids.length; i++) { var p = gPts[ids[i]]; out[ids[i]] = Math.atan2(p.y - c.y, p.x - c.x) }
+        return out
+    }
+    function twist() {  // mean turn of the five fingers since the start, in degrees (clockwise +)
+        var ids = Object.keys(gPts), now = fingerAngles(gList(), ids), sum = 0, n = 0
+        for (var i = 0; i < ids.length; i++) {
+            if (!(ids[i] in gAng0)) continue
+            var d = now[ids[i]] - gAng0[ids[i]]
+            while (d > Math.PI) d -= 2 * Math.PI
+            while (d < -Math.PI) d += 2 * Math.PI
+            sum += d; n++
+        }
+        return n ? sum / n * 180 / Math.PI : 0
+    }
     function endGesture() {
         if (gMode === "pan") act("pan end")
+        if (gMode === "rotate") act("rotate end")
         gMode = "dead"   // until every finger is up
         gTapOk = false
     }
@@ -267,13 +287,21 @@ Window {
         gMax = Math.max(gMax, n)
         if (n === 0) {
             if (gMode === "pan") act("pan end")
+            if (gMode === "rotate") act("rotate end")
             if (gMax > 0) touchEnded()
             gMode = ""; gMax = 0; gC0 = null; gMoved = 0; gTapOk = true; gStart = ({}); gT0 = 0; return
         }
         if (gT0 === 0) gT0 = Date.now()
         if (gMode === "dead") return
-        if (gMax > 3 || Date.now() - penSeen < 700 || !gesturesOn || mode !== "ink") { endGesture(); return }
-        if (n === 3) {
+        if (gMax > 5 || Date.now() - penSeen < 700 || !gesturesOn || mode !== "ink") { endGesture(); return }
+        if (gMode === "rotate" && n !== 5) { endGesture(); return }
+        if (n === 5) {
+            if (gMode === "three" && gSteps !== 0) { endGesture(); return }
+            if (gMode === "pan") act("pan end")
+            gMode = "five"; gC0 = centroid(l); gAng0 = fingerAngles(l, Object.keys(gPts)); gRotSent = 0
+        } else if (gMode === "five") {
+            gMode = "dead"   // a finger lifted before any turn: just a five-finger touch
+        } else if (n === 3) {
             if (gMode === "pan") act("pan end")
             gMode = "three"; gC0 = centroid(l); gSteps = 0
         } else if (n === 2 && gMode === "") {
@@ -305,6 +333,13 @@ Window {
                     act("pan " + Math.round(dx) + " " + Math.round(dy)); gSent = {x: dx, y: dy}
                 }
             }
+        } else if ((gMode === "five" || gMode === "rotate") && l.length === 5) {
+            var a = twist()
+            if (gMode === "five") {
+                if (Math.abs(a) < 8) return
+                gMode = "rotate"; gTapOk = false; act("rotate begin")
+            }
+            if (Math.abs(a - gRotSent) >= 1) { act("rotate " + a.toFixed(1)); gRotSent = a }
         } else if (gMode === "three" && l.length === 3) {
             // one undo per step of drag to the left, one redo per step to the right; dragging
             // back takes steps back. Mostly sideways only, so a vertical slide does nothing.
@@ -410,7 +445,7 @@ Window {
             Text {
                 x: 22; y: view.height - win.footH + 18; width: parent.width - 44; wrapMode: Text.Wrap
                 font.pixelSize: 19; color: "black"; lineHeight: 1.1
-                text: win.gesturesOn ? "3 fingers swipe left: undo, right: redo (further = more)\n2 fingers: drag to pan, pinch to zoom"
+                text: win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
                                      : "Power button: back to notebooks"
             }
         }

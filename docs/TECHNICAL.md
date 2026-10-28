@@ -73,7 +73,7 @@ was changed.
    ```
    python pc\rmtablet.py calibrate
    ```
-5. Run (or double-click `pc\run.bat`):
+5. Run:
    ```
    python pc\rmtablet.py run
    ```

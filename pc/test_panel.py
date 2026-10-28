@@ -205,5 +205,41 @@ class TapGestures(unittest.TestCase):
         self.assertEqual(e.sent, [])
 
 
+class Rotate(unittest.TestCase):
+    def patch_center(self):
+        old = keys.foreground_center
+        keys.foreground_center = lambda: (1000, 600)
+        self.addCleanup(setattr, keys, "foreground_center", old)
+
+    def test_twist_holds_key_and_drags_round_the_centre(self):
+        e = bare_engine()
+        self.patch_center()
+        e.tablet_action("rotate begin")
+        self.assertEqual(e.keys.held, {"r"})
+        self.assertEqual(e.mouse.start, (1000, 300))  # straight above the centre
+        e.tablet_action("rotate 90")
+        f, x, y = e.moves[-1]
+        self.assertEqual((x, y), e.mouse._abs(1300, 600))  # a quarter turn clockwise
+        e.tablet_action("rotate end")
+        self.assertEqual(e.keys.held, set())
+        self.assertEqual(e.moves[-2][0], keys.Mouse.LUP)
+        self.assertEqual(e.moves[-1][1:], e.mouse._abs(500, 400))  # cursor put back
+        self.assertEqual(e.last_action["action"], "rotate end")
+
+    def test_rotate_key_is_configurable_and_keeps_held_keys(self):
+        e = bare_engine({"rotate_keys": "shift+space"})
+        self.patch_center()
+        e.keys.down("shift")
+        e.tablet_action("rotate begin")
+        e.tablet_action("rotate end")
+        self.assertEqual(e.keys.held, {"shift"})
+
+    def test_stray_rotate_moves_are_ignored(self):
+        e = bare_engine()
+        e.tablet_action("rotate 30")
+        e.tablet_action("rotate end")
+        self.assertEqual(e.moves, [])
+
+
 if __name__ == "__main__":
     unittest.main()

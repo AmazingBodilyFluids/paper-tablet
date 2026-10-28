@@ -161,6 +161,17 @@ class Mouse:
         self.start = self._cursor()
         self._send(self.LDOWN)
 
+    def goto(self, x, y):
+        """Put the cursor at screen pixel (x, y) without pressing anything."""
+        ax, ay = self._abs(x, y)
+        self._send(self.MOVE | self.ABSOLUTE | self.VIRTUALDESK, ax, ay)
+
+    def begin_at(self, x, y):
+        """Press the left button at (x, y); move() is then relative to that point."""
+        self.goto(x, y)
+        self.start = (x, y)
+        self._send(self.LDOWN)
+
     def move(self, dx, dy):
         if self.start is None:
             return
@@ -171,3 +182,17 @@ class Mouse:
         if self.start is not None:
             self._send(self.LUP)
             self.start = None
+
+
+def foreground_center():
+    """Centre of the focused window in screen pixels: the pivot for the rotate drag (drawing
+    apps rotate the view around the middle of their window)."""
+    if sys.platform != "win32":
+        return 960, 540
+    import ctypes
+    from ctypes import wintypes as wt
+    u = ctypes.windll.user32
+    r = wt.RECT()
+    if not u.GetWindowRect(u.GetForegroundWindow(), ctypes.byref(r)):
+        return 960, 540
+    return (r.left + r.right) // 2, (r.top + r.bottom) // 2

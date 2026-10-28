@@ -11,6 +11,7 @@ rmpp-pen and rmpp-companion), so nothing is left behind on either side.
 """
 import collections
 import json
+import math
 import os
 import socket
 import sys
@@ -45,6 +46,7 @@ DEFAULTS = {
     "panel": "left", "panel_open": True, "gestures": True,
     "panel_buttons": None,  # filled from DEFAULT_BUTTONS below
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
+    "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
     "taps": None,           # tap gestures, filled from DEFAULT_TAPS below
 }
 PANEL_PX = 302  # panel width on the tablet, in panel pixels (about 34 mm)
@@ -510,6 +512,11 @@ class Engine:
                 val = clean_buttons(val)
             if key == "taps":
                 val = clean_taps(val)
+            if key == "rotate_keys":
+                try:
+                    val = "+".join(keys.parse(val))
+                except ValueError:
+                    val = DEFAULTS["rotate_keys"]
             if key == "swipe_step":
                 val = max(40, min(400, int(val)))
             self.cfg[key] = val
@@ -609,6 +616,10 @@ class Engine:
             self.pan(parts[1:])
             if arg != "end":
                 return  # moves are many; only the start and end show in the UI
+        elif name == "rotate":
+            self.rotate(parts[1:])
+            if arg != "end":
+                return
         elif name == "tap" and len(parts) == 3:
             t = clean_taps(self.cfg.get("taps")).get(f"{parts[1]}x{parts[2]}")
             if not t or not t["keys"]:
@@ -652,6 +663,49 @@ class Engine:
                 return
             sx, sy = self.pan_scale()
             self.mouse.move(int(round(dx * sx)), int(round(dy * sy)))
+
+    ROT_RADIUS = 300  # screen pixels from the window centre to where the rotate drag runs
+
+    def rotate(self, args):
+        """Five-finger twist: hold the rotate key and drag around the window centre by the same
+        angle (Photoshop's Rotate View, Krita's Shift+Space drag). The cursor goes back after."""
+        if not args:
+            return
+        if args[0] == "begin":
+            spec = self.cfg.get("rotate_keys") or "r"
+            try:
+                names = keys.parse(spec)
+            except ValueError:
+                names = ["r"]
+            self.rot_pressed = [n for n in names if n not in self.keys.held]
+            if self.rot_pressed:
+                self.keys.down("+".join(self.rot_pressed))
+                time.sleep(0.05)  # let the app switch tools before the button goes down
+            self.rot_back = self.mouse._cursor()
+            self.rot_c = keys.foreground_center()
+            cx, cy = self.rot_c
+            self.mouse.begin_at(cx, cy - self.ROT_RADIUS)
+        elif args[0] == "end":
+            if getattr(self, "rot_c", None) is None:
+                return
+            self.mouse.end()
+            if self.rot_pressed:
+                time.sleep(0.02)
+                self.keys.up("+".join(self.rot_pressed))
+            self.mouse.goto(*self.rot_back)
+            self.rot_c = None
+            self.rot_pressed = []
+        else:
+            if getattr(self, "rot_c", None) is None:
+                return
+            try:
+                a = math.radians(float(args[0]) - 90)
+            except ValueError:
+                return
+            cx, cy = self.rot_c
+            x, y = cx + self.ROT_RADIUS * math.cos(a), cy + self.ROT_RADIUS * math.sin(a)
+            sx, sy = self.mouse.start
+            self.mouse.move(int(round(x - sx)), int(round(y - sy)))
 
     def snap_allowed(self, name):
         return shapes.app_allowed(name, str(self.cfg.get("snap_apps", "")).split(","))
