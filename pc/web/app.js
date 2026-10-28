@@ -136,6 +136,9 @@ function render() {
   const la = S.last_action;
   $("#lastAction").textContent = (la ? `Last from the tablet: ${la.action} (${ago(la.at)} s ago).` : "") +
     (S.held_keys && S.held_keys.length ? ` Held down now: ${S.held_keys.join(", ")}.` : "");
+  const pr = S.pen_rate;
+  $("#rateText").innerHTML = pr ? `<span><b>tablet</b> ${pr.tablet} reports/s</span><span><b>reaching this PC</b> ${pr.pc ?? "…"} /s</span>`
+                                : "<span>Not measured yet: draw a stroke.</span>";
   const log = $("#scrLog");
   log.textContent = (S.screen_log || []).join("\n") || "Nothing yet.";
   log.scrollTop = log.scrollHeight;

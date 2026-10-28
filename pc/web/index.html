@@ -196,6 +196,11 @@
             <div class="row between mts"><span class="readout" id="peakText" style="margin:0"></span><button class="btn ghost" onclick="api().reset_peak()">Reset</button></div>
           </div>
           <div class="pane">
+            <div class="pane-title">Report rate</div>
+            <div class="readout" id="rateText" style="margin:0"></div>
+            <p class="hint mts">Every report from the tablet's digitizer goes to Windows as it arrives; there is no fixed frame rate in between. Draw a few strokes to measure.</p>
+          </div>
+          <div class="pane">
             <div class="pane-title">Options</div>
             <div class="opt"><div class="tx"><div class="t1">Send pen tilt</div><div class="t2">For brushes that respond to angle</div></div>
               <span class="switch"><input type="checkbox" data-key="tilt"><span class="track"></span></span></div>

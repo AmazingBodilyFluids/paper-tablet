@@ -241,5 +241,26 @@ class Rotate(unittest.TestCase):
         self.assertEqual(e.moves, [])
 
 
+class ReportRate(unittest.TestCase):
+    def test_parser_keeps_kernel_timestamps(self):
+        import struct as st
+        import rmtablet as rt
+        rec = lambda sec, usec, t, c, v: st.pack("<qqHHi", sec, usec, t, c, v)
+        p = rt.EvdevParser("<qqHHi")
+        out = list(p.feed(rec(10, 500000, 3, 0, 5) + rec(10, 500000, 0, 0, 0)))
+        self.assertEqual(out[0].t, 10.5)
+
+    def test_rate_meter_median_and_gaps(self):
+        r = core.RateMeter()
+        t = 0.0
+        for k in range(200):
+            t += 0.5 if k == 100 else 1 / 240  # one long pause in the middle
+            r.add(t, t + 3 + (0.002 if k % 3 else 0))
+        res = r.compute()
+        self.assertEqual(res["tablet"], 240)
+        self.assertAlmostEqual(res["pc"], 240, delta=8)
+        self.assertIsNotNone(r.last)
+
+
 if __name__ == "__main__":
     unittest.main()

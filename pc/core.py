@@ -144,6 +144,51 @@ def use_profile_config():
     return target
 
 
+class RateMeter:
+    """Pen report rate: how often the tablet's digitizer reports (kernel timestamps) and how
+    often reports reach this PC, over the last stretch the pen was in range. Gaps over 50 ms
+    (pen lifted out of range, pauses) don't count."""
+
+    GAP = 0.05
+
+    def __init__(self, keep=400):
+        self.samples = collections.deque(maxlen=keep)  # (tablet time, arrival time)
+        self.last = None  # last result with enough samples, kept after the pen leaves
+
+    def add(self, t_tablet, t_arrival):
+        self.samples.append((t_tablet, t_arrival))
+        if len(self.samples) % 50 == 0:
+            r = self.compute()
+            if r:
+                self.last = r
+
+    @staticmethod
+    def _hz(times, gap):
+        dts = [b - a for a, b in zip(times, times[1:]) if 0 < b - a < gap]
+        if len(dts) < 20:
+            return None
+        dts.sort()
+        return 1 / dts[len(dts) // 2]  # median: robust to the odd late or bunched report
+
+    def compute(self):
+        tab = [a for a, _ in self.samples]
+        pc = [b for _, b in self.samples]
+        th = self._hz(tab, self.GAP)
+        if th is None:
+            return None
+        # arrivals bunch up in network reads, so for the PC count reports per second of wall
+        # clock over each unbroken stretch (split where the tablet's own clock shows a gap)
+        n, span, start = 0, 0.0, 0
+        for i in range(1, len(tab) + 1):
+            if i == len(tab) or not 0 <= tab[i] - tab[i - 1] < self.GAP:
+                if i - start > 1:
+                    n += i - start - 1
+                    span += pc[i - 1] - pc[start]
+                start = i
+        ph = n / span if span > 0.2 else None
+        return {"tablet": round(th), "pc": round(ph) if ph else None, "n": len(tab)}
+
+
 class NullPen:
     def send(self, f):
         pass
@@ -344,8 +389,11 @@ class Worker(threading.Thread):
                         self.snapper.hold_ms = int(e.cfg.get("snap_hold_ms") or 600)
                         self.snapper.tick()
                     continue
+                now = time.monotonic()
                 for s in parser.feed(chunk):
                     self.latest = s
+                    if s.in_range and s.t:
+                        e.rate.add(s.t, now)
                     down = s.in_range and (s.touch or s.pressure > 0)
                     if e.cal is not None:
                         if down and not was_down:
@@ -431,6 +479,7 @@ class Engine:
         self.mouse = keys.Mouse()
         self.pan_space = False
         self.last_action = None
+        self.rate = RateMeter()
         self.mapper = None
         self.refresh_mapper()
         self._stop = threading.Event()
@@ -484,7 +533,7 @@ class Engine:
             "snap_last": self.snap_last, "last_action": self.last_action, "held_keys": sorted(self.keys.held),
             "view": self.view_size(), "panel_px": PANEL_PX, "tab_px": TAB_PX,
             "key_names": sorted(keys.VK), "key_labels": keys.LABEL, "default_buttons": DEFAULT_BUTTONS,
-            "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
+            "pen_rate": self.rate.last, "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
         }
 
     def live(self):

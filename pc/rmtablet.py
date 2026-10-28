@@ -139,6 +139,7 @@ class PenState:
     rubber: bool = False
     touch: bool = False
     barrel: bool = False
+    t: float = 0.0  # kernel timestamp of the report (seconds), for measuring the report rate
 
     @property
     def in_range(self):
@@ -159,11 +160,12 @@ class EvdevParser:
         n = len(self.buf) // self.st.size * self.st.size
         chunk, self.buf = self.buf[:n], self.buf[n:]
         s = self.state
-        for _, _, etype, code, value in self.st.iter_unpack(chunk):
+        for sec, usec, etype, code, value in self.st.iter_unpack(chunk):
             if etype == EV_SYN:
                 if code == SYN_DROPPED:
                     self.dropping = True  # kernel buffer overrun: discard until next report
                 elif code == SYN_REPORT:
+                    s.t = sec + usec / 1e6
                     if not self.dropping:
                         yield PenState(**vars(s))
                     self.dropping = False
