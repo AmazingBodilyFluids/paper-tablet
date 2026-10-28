@@ -5,3 +5,11 @@
 @font-face { font-family:"IBM Plex Sans"; font-weight:600; src:url("fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
 @font-face { font-family:"IBM Plex Mono"; font-weight:400; src:url("fonts/IBMPlexMono-Regular.woff2") format("woff2"); }
 @font-face { font-family:"IBM Plex Mono"; font-weight:600; src:url("fonts/IBMPlexMono-SemiBold.woff2") format("woff2"); }
+/* Theme fonts: Libre Franklin (Ledger) and Work Sans (Intaglio), Latin, SIL Open Font License 1.1
+   (fonts/OFL-Libre-Franklin.txt, fonts/OFL-Work-Sans.txt). Loaded only when a theme uses them. */
+@font-face { font-family:"Libre Franklin"; font-weight:400; src:url("fonts/LibreFranklin-400.woff2") format("woff2"); }
+@font-face { font-family:"Libre Franklin"; font-weight:500; src:url("fonts/LibreFranklin-500.woff2") format("woff2"); }
+@font-face { font-family:"Libre Franklin"; font-weight:600; src:url("fonts/LibreFranklin-600.woff2") format("woff2"); }
+@font-face { font-family:"Work Sans"; font-weight:400; src:url("fonts/WorkSans-400.woff2") format("woff2"); }
+@font-face { font-family:"Work Sans"; font-weight:500; src:url("fonts/WorkSans-500.woff2") format("woff2"); }
+@font-face { font-family:"Work Sans"; font-weight:600; src:url("fonts/WorkSans-600.woff2") format("woff2"); }

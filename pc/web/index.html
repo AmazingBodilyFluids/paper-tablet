@@ -5,6 +5,7 @@
 <title>Paper Tablet</title>
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="themes.css">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute">
@@ -29,8 +30,9 @@
   <div class="tb-spacer pywebview-drag-region"></div>
   <div class="pill" id="pill"><span class="dot" id="pillDot"></span><span id="pillText">Starting…</span></div>
   <div class="tb-spacer pywebview-drag-region"></div>
+  <div class="themes" id="themes" role="radiogroup" aria-label="Theme"></div>
   <button class="wb" title="Minimise" onclick="api().win_minimize()"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></button>
-  <button class="wb" title="Maximise" onclick="api().win_toggle_max()"><svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1"/></svg></button>
+  <button class="wb" title="Maximise" onclick="toggleMax()"><svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1"/></svg></button>
   <button class="wb close" title="Close" onclick="api().win_close()"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></button>
 </header>
 
@@ -83,7 +85,7 @@
         <div class="preview-wrap" style="height:330px"><canvas id="homePreview"></canvas></div>
         <div class="row between">
           <div class="readout" id="homeReadout"></div>
-          <div class="legend mts"><span><i style="background:rgba(74,158,224,.35)"></i>reaches your display</span><span><i style="border:1.5px dashed #C4A882"></i>active area</span></div>
+          <div class="legend mts"><span><i style="background:var(--accent2-b)"></i>reaches your display</span><span><i style="border:1.5px dashed var(--accent)"></i>active area</span></div>
         </div>
       </div>
         <div class="pane">
@@ -169,7 +171,7 @@
         <div class="pane">
           <div class="pane-title">Tablet, as it sits on your desk</div>
           <div class="preview-wrap drag" style="height:400px" id="mapWrap"><canvas id="mapPreview"></canvas></div>
-          <div class="legend mts"><span><i style="background:rgba(74,158,224,.35)"></i>reaches your display</span><span><i style="border:1.5px dashed #C4A882"></i>active area: drag to change</span></div>
+          <div class="legend mts"><span><i style="background:var(--accent2-b)"></i>reaches your display</span><span><i style="border:1.5px dashed var(--accent)"></i>active area: drag to change</span></div>
         </div>
       </div>
     </section>
@@ -315,6 +317,8 @@
           <div class="pane-title">Behaviour</div>
           <div class="opt"><div class="tx"><div class="t1">Keep the notebook from reacting to the pen</div><div class="t2">Only matters when the tablet screen is off. Taps then go to Windows only.</div></div>
             <span class="switch"><input type="checkbox" data-key="grab"><span class="track"></span></span></div>
+          <div class="opt"><div class="tx"><div class="t1">Keep running in the tray when the window is closed</div><div class="t2">The pen keeps working. Open or exit Paper Tablet from its tray icon.</div></div>
+            <span class="switch"><input type="checkbox" data-key="close_to_tray"><span class="track"></span></span></div>
           <div class="opt"><div class="tx"><div class="t1">Setup guide</div><div class="t2">Walk through developer mode and the cable again</div></div>
             <button class="btn" onclick="Wizard.open()">Open</button></div>
           <div class="opt"><div class="tx"><div class="t1">About</div><div class="t2">Paper Tablet <span id="appVersion"></span>, for reMarkable Paper Pro. Not affiliated with reMarkable AS. Fonts: IBM Plex (SIL OFL).</div></div></div>
@@ -340,6 +344,8 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="grips"><i data-edge="n"></i><i data-edge="s"></i><i data-edge="w"></i><i data-edge="e"></i>
+  <i data-edge="nw"></i><i data-edge="ne"></i><i data-edge="sw"></i><i data-edge="se"></i></div>
 <script src="app.js"></script>
 </body>
 </html>

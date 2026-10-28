@@ -1,0 +1,47 @@
+/* Colour themes, chosen in the title bar (html[data-theme], saved as the "theme" setting).
+   "default" is app.css's own :root palette. Graphite, Ledger and Intaglio come from Kallisti Case
+   Manager (ui/app.css), mapped onto Paper Tablet's variables; --s4 and --border2 are added here.
+   Load after app.css. The tablet pictures (body, paper screen) keep their own colours. */
+[data-theme="graphite"] {
+  --ink:#f2f0ea;
+  --bg:#101215; --s1:#15181c; --s2:#1b1f24; --s3:#20252b; --s4:#272c33;
+  --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.08);
+  --accent:#d8bb8a; --accent-d:rgba(216,187,138,0.10); --accent-b:rgba(216,187,138,0.30);
+  --accent2:#7fb3d5; --accent2-d:rgba(127,179,213,0.10); --accent2-b:rgba(127,179,213,0.28);
+  --text:#f2f0ea; --dim:rgba(242,240,234,0.72); --dim2:rgba(242,240,234,0.56);
+  --green:#5fd19b; --red:#ff6b5f; --amber:#f0a54a;
+  --f-sans:"IBM Plex Sans",system-ui,sans-serif; --f-mono:"IBM Plex Mono",Consolas,monospace;
+  --radius:3px; --radius-lg:4px; --win-border:rgba(216,187,138,0.40);
+  color-scheme:dark;
+}
+[data-theme="ledger"] {
+  --ink:#1d2420;
+  --bg:#f4f1e8; --s1:#ebe6d8; --s2:#e3ddcc; --s3:#d9d2be; --s4:#cdc5ae;
+  --border:rgba(29,36,32,0.14); --border2:rgba(29,36,32,0.16);
+  --accent:#1f5c45; --accent-d:rgba(31,92,69,0.09); --accent-b:rgba(31,92,69,0.28);
+  --accent2:#164f96; --accent2-d:rgba(22,79,150,0.09); --accent2-b:rgba(22,79,150,0.26);
+  --text:#1d2420; --dim:rgba(29,36,32,0.80); --dim2:rgba(29,36,32,0.70);
+  --green:#1f5c45; --red:#a3271f; --amber:#7d4509;
+  --f-sans:"Libre Franklin","IBM Plex Sans",sans-serif; --f-mono:"IBM Plex Mono",Consolas,monospace;
+  --radius:2px; --radius-lg:3px; --win-border:rgba(31,92,69,0.45);
+  color-scheme:light;
+}
+[data-theme="intaglio"] {
+  --ink:#eef0e6;
+  --bg:#0e1a15; --s1:#13231c; --s2:#1a2e25; --s3:#20382d; --s4:#284436;
+  --border:rgba(207,181,122,0.12); --border2:rgba(238,240,230,0.08);
+  --accent:#cfb57a; --accent-d:rgba(207,181,122,0.10); --accent-b:rgba(207,181,122,0.30);
+  --accent2:#7fb8d6; --accent2-d:rgba(127,184,214,0.10); --accent2-b:rgba(127,184,214,0.28);
+  --text:#eef0e6; --dim:rgba(238,240,230,0.74); --dim2:rgba(238,240,230,0.60);
+  --green:#8fcf9f; --red:#f0806f; --amber:#d9a14e;
+  --f-sans:"Work Sans","IBM Plex Sans",sans-serif; --f-mono:"IBM Plex Mono",Consolas,monospace;
+  --radius:2px; --radius-lg:4px; --win-border:rgba(207,181,122,0.45);
+  color-scheme:dark;
+}
+
+/* each theme's one material signature, as in Kallisti */
+[data-theme="ledger"] .content { background:repeating-linear-gradient(var(--bg) 0 31px, rgba(29,36,32,0.07) 31px 32px); }
+[data-theme="ledger"] .titlebar { background:#1d2420; color:#f4f1e8; --bg:#161c19; --ink:#f4f1e8; --text:#f4f1e8; --dim:rgba(244,241,232,0.80);
+  --dim2:rgba(244,241,232,0.66); --s1:#232c27; --s2:#2b3530; --s3:#34403a; --border:rgba(244,241,232,0.14);
+  --border2:rgba(244,241,232,0.16); --accent:#9fd0b4; --accent-d:rgba(159,208,180,0.12); --accent-b:rgba(159,208,180,0.32); }
+[data-theme="intaglio"] .titlebar { background:var(--s1) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='38'%3E%3Cg fill='none' stroke='%23cfb57a' stroke-opacity='.13' stroke-width='.6'%3E%3Cpath d='M0 19 C20 4 40 34 60 19 S100 4 120 19'/%3E%3Cpath d='M0 19 C20 34 40 4 60 19 S100 34 120 19'/%3E%3Cpath d='M0 11 C20 -4 40 26 60 11 S100 -4 120 11'/%3E%3Cpath d='M0 27 C20 42 40 12 60 27 S100 42 120 27'/%3E%3C/g%3E%3C/svg%3E"); }

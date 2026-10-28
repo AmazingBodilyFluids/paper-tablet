@@ -5,7 +5,7 @@
   --border:rgba(196,168,130,0.10); --border2:rgba(255,255,255,0.07);
   --accent:#C4A882; --accent-d:rgba(196,168,130,0.10); --accent-b:rgba(196,168,130,0.30);
   --accent2:#4A9EE0; --accent2-d:rgba(74,158,224,0.12); --accent2-b:rgba(74,158,224,0.35);
-  --text:rgba(255,255,255,0.88); --dim:rgba(255,255,255,0.68); --dim2:rgba(255,255,255,0.46);
+  --ink:#fff; --text:rgba(255,255,255,0.88); --dim:rgba(255,255,255,0.68); --dim2:rgba(255,255,255,0.46);
   --green:#4ecb8b; --red:#ff5d5d; --amber:#ff9d52;
   --f-sans:"IBM Plex Sans",system-ui,sans-serif; --f-mono:"IBM Plex Mono",Consolas,monospace;
   --radius:3px; --radius-lg:6px; --win-border:rgba(196,168,130,0.45);
@@ -44,6 +44,23 @@ kbd { font-family:var(--f-mono); font-size:11px; padding:1px 6px; border:1px sol
 .wb svg { width:12px; height:12px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; }
 .wb:hover { background:var(--accent-d); color:var(--accent); }
 .wb.close:hover { background:rgba(255,60,60,0.14); color:var(--red); }
+/* theme switcher: one swatch per theme, its background and accent split diagonally */
+.themes { display:flex; align-items:center; gap:8px; padding:0 10px 0 4px; }
+.themes button { width:13px; height:13px; border-radius:50%; background:linear-gradient(135deg, var(--sw-bg) 50%, var(--sw-acc) 50%);
+                 box-shadow:0 0 0 1px color-mix(in srgb, var(--text) 40%, transparent); transition:box-shadow .12s, transform .12s; }
+.themes button:hover { transform:scale(1.18); }
+.themes button.on { box-shadow:0 0 0 1.5px var(--s1), 0 0 0 3px var(--accent); }
+/* window edges: the window has no frame, so these grips resize it (app.js, winextras.Resizer) */
+.grips i { position:fixed; z-index:1000; }
+.grips [data-edge="n"] { top:0; left:10px; right:10px; height:5px; cursor:ns-resize; }
+.grips [data-edge="s"] { bottom:0; left:10px; right:10px; height:5px; cursor:ns-resize; }
+.grips [data-edge="w"] { left:0; top:10px; bottom:10px; width:5px; cursor:ew-resize; }
+.grips [data-edge="e"] { right:0; top:10px; bottom:10px; width:5px; cursor:ew-resize; }
+.grips [data-edge="nw"] { left:0; top:0; width:10px; height:10px; cursor:nwse-resize; }
+.grips [data-edge="se"] { right:0; bottom:0; width:10px; height:10px; cursor:nwse-resize; }
+.grips [data-edge="ne"] { right:0; top:0; width:10px; height:10px; cursor:nesw-resize; }
+.grips [data-edge="sw"] { left:0; bottom:0; width:10px; height:10px; cursor:nesw-resize; }
+html.maxed .grips { display:none; }
 
 /* ---------------------------------------------------------------- layout */
 .layout { display:flex; flex:1; overflow:hidden; }
@@ -67,7 +84,7 @@ kbd { font-family:var(--f-mono); font-size:11px; padding:1px 6px; border:1px sol
 .view { display:none; max-width:1060px; margin:0 auto; animation:enter .22s ease; }
 .view.on { display:block; }
 @keyframes enter { from { opacity:0; transform:translateY(4px); } }
-h1 { font-size:24px; font-weight:300; letter-spacing:-0.01em; color:#fff; }
+h1 { font-size:24px; font-weight:300; letter-spacing:-0.01em; color:var(--ink); }
 h2 { font-size:15px; font-weight:500; color:var(--text); }
 .lead { color:var(--dim); margin-top:6px; max-width:640px; }
 .lbl { font-family:var(--f-mono); font-size:10px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--dim2); }
@@ -91,7 +108,7 @@ h2 { font-size:15px; font-weight:500; color:var(--text); }
                       background:radial-gradient(closest-side, var(--accent-d), transparent); pointer-events:none; }
 .state { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
 .state .dot { width:9px; height:9px; }
-.big { font-size:26px; font-weight:300; color:#fff; line-height:1.25; }
+.big { font-size:26px; font-weight:300; color:var(--ink); line-height:1.25; }
 .toggles { display:flex; flex-direction:column; gap:10px; }
 .tcard { display:flex; align-items:center; gap:14px; padding:16px 18px; border:1px solid var(--border2); border-radius:var(--radius-lg);
          background:var(--s1); transition:border-color .15s, background .15s; }
@@ -123,7 +140,7 @@ h2 { font-size:15px; font-weight:500; color:var(--text); }
        border:1px solid var(--border2); color:var(--text); background:var(--s2); transition:all .12s; white-space:nowrap; }
 .btn:hover { border-color:var(--dim2); }
 .btn.acc { color:var(--bg); background:var(--accent); border-color:var(--accent); }
-.btn.acc:hover { background:#d4bb98; }
+.btn.acc:hover { background:color-mix(in srgb, var(--accent) 86%, #fff); }
 .btn.ghost { background:transparent; }
 .btn.blue { color:var(--accent2); border-color:var(--accent2-b); background:var(--accent2-d); }
 .btn:disabled { opacity:0.4; cursor:default; }
@@ -171,7 +188,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:15px; h
              border:1px solid var(--accent-b); border-radius:2px; padding:0 5px; margin-left:6px; vertical-align:2px; }
 .calbox { display:grid; grid-template-columns:300px 1fr; gap:26px; align-items:center; }
 .targets { width:300px; height:225px; }
-.prompt { font-size:20px; font-weight:300; color:#fff; }
+.prompt { font-size:20px; font-weight:300; color:var(--ink); }
 .progress { height:3px; background:var(--s4); border-radius:2px; overflow:hidden; margin-top:14px; }
 .progress > i { display:block; height:100%; background:var(--accent); width:0; transition:width .25s; }
 .resid { display:grid; grid-template-columns:repeat(3, 64px); gap:4px; margin-top:10px; }

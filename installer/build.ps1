@@ -41,12 +41,16 @@ $Stage = Join-Path $Build "app"
 $Prereqs = Join-Path $Build "prereqs"
 $Tools = Join-Path $Build "tools"
 $Dist = Join-Path $Here "dist"
-$Icon = Join-Path $Here "paper-tablet.ico"
+$Icon = Join-Path $Repo "pc\icons\paper-tablet.ico"
 
 $m = Select-String -Path (Join-Path $Repo "pc\version.py") -Pattern '__version__\s*=\s*"([^"]+)"'
 if (-not $m) { throw "No __version__ in pc\version.py" }
 $Version = $m.Matches[0].Groups[1].Value
 Write-Host "Paper Tablet $Version"
+
+# A copy of the app started from this build's runtime locks its files.
+$busy = Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($Build, [StringComparison]::OrdinalIgnoreCase) }
+if ($busy) { throw "Paper Tablet is running from $Build (process $($busy.Id -join ', ')). Exit it from its tray icon first." }
 
 if ($Clean -and (Test-Path $Build)) {
     Write-Host "Removing $Build..."
@@ -110,7 +114,7 @@ if ($LASTEXITCODE) { throw "rcedit failed" }
 Download "https://go.microsoft.com/fwlink/p/?LinkId=2124703" (Join-Path $Prereqs "MicrosoftEdgeWebView2Setup.exe")
 
 # -- 4. Stage the app ---------------------------------------------------------
-# Same layout as the repo: app.py finds web\ and ..\tablet\ relative to itself.
+# Same layout as the repo: app.py finds web\, icons\ and ..\tablet\ relative to itself.
 if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
 $pcOut = Join-Path $Stage "pc"
 New-Item -ItemType Directory -Force -Path $pcOut, (Join-Path $Stage "tablet\companion") | Out-Null
@@ -119,6 +123,7 @@ Get-ChildItem (Join-Path $Repo "pc") -Filter *.py |
     ForEach-Object { Copy-Item $_.FullName $pcOut }
 Copy-Item (Join-Path $Repo "pc\requirements.txt") $pcOut
 Copy-Item (Join-Path $Repo "pc\web") $pcOut -Recurse
+Copy-Item (Join-Path $Repo "pc\icons") $pcOut -Recurse
 # Linux binaries and a shell script for the tablet: Copy-Item keeps the bytes (and run.sh's LF).
 foreach ($f in "tablet\rmpp-pen", "tablet\companion\rmpp-companion", "tablet\companion\run.sh") {
     Copy-Item (Join-Path $Repo $f) (Join-Path $Stage $f)
