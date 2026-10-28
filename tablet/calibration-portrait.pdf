@@ -1,0 +1,69 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1251 >>
+stream
+1 w 0 0 0 RG 0 0 0 rg
+32.0 720.0 m 88.0 720.0 l S
+60.0 692.0 m 60.0 748.0 l S
+50.0 710.0 20 20 re S
+BT /F1 18 Tf 76.0 742.0 Td (1) Tj ET
+272.0 720.0 m 328.0 720.0 l S
+300.0 692.0 m 300.0 748.0 l S
+290.0 710.0 20 20 re S
+BT /F1 18 Tf 316.0 742.0 Td (2) Tj ET
+512.0 720.0 m 568.0 720.0 l S
+540.0 692.0 m 540.0 748.0 l S
+530.0 710.0 20 20 re S
+BT /F1 18 Tf 556.0 742.0 Td (3) Tj ET
+32.0 400.0 m 88.0 400.0 l S
+60.0 372.0 m 60.0 428.0 l S
+50.0 390.0 20 20 re S
+BT /F1 18 Tf 76.0 422.0 Td (4) Tj ET
+272.0 400.0 m 328.0 400.0 l S
+300.0 372.0 m 300.0 428.0 l S
+290.0 390.0 20 20 re S
+BT /F1 18 Tf 316.0 422.0 Td (5) Tj ET
+512.0 400.0 m 568.0 400.0 l S
+540.0 372.0 m 540.0 428.0 l S
+530.0 390.0 20 20 re S
+BT /F1 18 Tf 556.0 422.0 Td (6) Tj ET
+32.0 80.0 m 88.0 80.0 l S
+60.0 52.0 m 60.0 108.0 l S
+50.0 70.0 20 20 re S
+BT /F1 18 Tf 76.0 44.0 Td (7) Tj ET
+272.0 80.0 m 328.0 80.0 l S
+300.0 52.0 m 300.0 108.0 l S
+290.0 70.0 20 20 re S
+BT /F1 18 Tf 316.0 44.0 Td (8) Tj ET
+512.0 80.0 m 568.0 80.0 l S
+540.0 52.0 m 540.0 108.0 l S
+530.0 70.0 20 20 re S
+BT /F1 18 Tf 556.0 44.0 Td (9) Tj ET
+BT /F1 12 Tf 150.0 240.0 Td (Calibration sheet: open full screen, no zoom.) Tj ET
+BT /F1 12 Tf 150.0 222.0 Td (Tap the crosshair centres in the order the PC app asks.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001544 00000 n 
+trailer << /Size 6 /Root 1 0 R >>
+startxref
+1614
+%%EOF

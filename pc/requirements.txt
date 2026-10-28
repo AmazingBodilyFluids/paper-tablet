@@ -1,0 +1,2 @@
+paramiko>=3.4
+pywebview>=5.3

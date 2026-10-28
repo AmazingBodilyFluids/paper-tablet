@@ -1,0 +1,209 @@
+"""Panel buttons, key combinations and tablet actions (no Windows, no tablet needed)."""
+import types
+import unittest
+
+import core
+import keys
+
+
+class KeyNames(unittest.TestCase):
+    def test_parse_and_label(self):
+        self.assertEqual(keys.parse("Ctrl + Shift + S"), ["ctrl", "shift", "s"])
+        self.assertEqual(keys.label("ctrl+shift+z"), "Ctrl Shift Z")
+        self.assertEqual(keys.label("ctrl+="), "Ctrl =")
+        self.assertEqual(keys.label("pagedown"), "PgDn")
+        self.assertEqual(keys.label("bogus"), "")
+        for bad in ("", "+", "ctrl+numpadplus"):
+            with self.assertRaises(ValueError):
+                keys.parse(bad)
+
+    def test_every_name_the_editor_records_is_known(self):
+        # the names app.js makes from KeyboardEvent.code
+        recorded = list("abcdefghijklmnopqrstuvwxyz0123456789") + [f"f{n}" for n in range(1, 25)] + [
+            "space", "enter", "esc", "backspace", "tab", "delete", "insert", "home", "end", "pageup", "pagedown",
+            "left", "right", "up", "down", "[", "]", "\\", ";", "'", ",", ".", "/", "`", "-", "=",
+            "ctrl", "shift", "alt", "win"]
+        for n in recorded:
+            self.assertIn(n, keys.VK, n)
+
+    def test_arrows_are_extended_and_holds_release(self):
+        sent = []
+        k = keys.Keys(send=lambda vk, up, ext=False: sent.append((vk, up, ext)))
+        k.combo("ctrl+left")
+        self.assertEqual(sent, [(0x11, False, False), (0x25, False, True), (0x25, True, True), (0x11, True, False)])
+        sent.clear()
+        k.down("ctrl+shift")
+        self.assertEqual(k.held, {"ctrl", "shift"})
+        k.release_all()
+        self.assertEqual(k.held, set())
+        self.assertEqual({s for s in sent if s[1]}, {(0x10, True, False), (0x11, True, False)})
+
+    def test_alt_release_is_masked(self):
+        sent = []
+        k = keys.Keys(send=lambda vk, up, ext=False: sent.append((vk, up)))
+        k.down("alt")
+        k.up("alt")
+        self.assertEqual(sent, [(0x12, False), (0x11, False), (0x11, True), (0x12, True)])
+
+
+class CleanButtons(unittest.TestCase):
+    def test_defaults_are_clean_and_sixteen(self):
+        self.assertEqual(core.clean_buttons(core.DEFAULT_BUTTONS), core.DEFAULT_BUTTONS)
+        self.assertEqual(len(core.DEFAULT_BUTTONS), core.PANEL_SLOTS)
+
+    def test_pads_trims_and_validates(self):
+        out = core.clean_buttons([
+            {"t": "A very long title here", "kind": "shortcut", "keys": "Ctrl + S"},
+            {"t": "Bad", "kind": "shortcut", "keys": "ctrl+nope"},
+            {"t": "Weird", "kind": "launch-rockets", "keys": "x"},
+            {"t": "Pen", "kind": "pen", "keys": "ctrl+z"},
+            "not a dict",
+        ] + [{}] * 20)
+        self.assertEqual(len(out), core.PANEL_SLOTS)
+        self.assertEqual(out[0], {"t": "A very long ti", "kind": "shortcut", "keys": "ctrl+s"})
+        self.assertEqual(out[1]["kind"], "none")
+        self.assertEqual(out[2]["kind"], "none")
+        self.assertEqual(out[3], {"t": "Pen", "kind": "pen", "keys": ""})
+        self.assertEqual(out[4], {"t": "", "kind": "none", "keys": ""})
+        self.assertEqual(len(core.clean_buttons(None)), core.PANEL_SLOTS)
+
+
+def bare_engine(cfg=None):
+    """An Engine without its constructor (no config file, monitors or threads)."""
+    e = object.__new__(core.Engine)
+    e.cfg = dict(core.DEFAULTS, **(cfg or {}))
+    e.sent = []
+    e.keys = keys.Keys(send=lambda vk, up, ext=False: e.sent.append((vk, up)))
+    moves = e.moves = []
+    e.mouse = keys.Mouse(send=lambda f, x=0, y=0: moves.append((f, x, y)), cursor=lambda: (500, 400),
+                         desk=lambda: (0, 0, 1920, 1080))
+    e.pan_space = False
+    e.last_action = None
+    e.mapper = None
+    e.changed = lambda: None
+    e.settings = []
+    e.set = lambda k, v: e.settings.append((k, v))
+    e.set_output = lambda on: e.settings.append(("output", on))
+    e.companion = types.SimpleNamespace(running=True)
+    e.cal = None
+    e.companion_rotation = lambda: 3
+    return e
+
+
+class TabletActions(unittest.TestCase):
+    def test_shortcut_button_taps_its_keys(self):
+        e = bare_engine({"panel_buttons": [{"t": "Save", "kind": "shortcut", "keys": "ctrl+s"}]})
+        e.tablet_action("press 0")
+        self.assertEqual(e.sent, [(0x11, False), (0x53, False), (0x53, True), (0x11, True)])
+        e.sent.clear()
+        e.tablet_action("release 0")
+        self.assertEqual(e.sent, [])
+        self.assertEqual(e.last_action["action"], "press 0")  # a tap button ignores its release
+
+    def test_hold_button_holds_until_release(self):
+        e = bare_engine({"panel_buttons": [{}, {"t": "Rotate", "kind": "hold", "keys": "r"}]})
+        e.tablet_action("press 1")
+        self.assertEqual(e.keys.held, {"r"})
+        e.tablet_action("release 1")
+        self.assertEqual(e.keys.held, set())
+        self.assertEqual(e.sent, [(0x52, False), (0x52, True)])
+
+    def test_empty_and_out_of_range_do_nothing(self):
+        e = bare_engine()
+        e.tablet_action("press 99")
+        e.tablet_action("press x")
+        e.tablet_action("bogus")
+        self.assertEqual((e.sent, e.last_action), ([], None))
+
+    def test_gestures_send_shortcuts(self):
+        e = bare_engine()
+        e.tablet_action("undo")
+        e.tablet_action("zoomin")
+        self.assertEqual([vk for vk, up in e.sent if not up], [0x11, 0x5A, 0x11, 0xBB])
+
+    def test_pan_holds_space_and_drags(self):
+        e = bare_engine()
+        e.pan_scale = lambda: (2.0, 1.0)
+        e.tablet_action("pan begin")
+        self.assertEqual(e.keys.held, {"space"})
+        e.tablet_action("pan 10 -20")
+        e.tablet_action("pan end")
+        self.assertEqual(e.keys.held, set())
+        flags = [m[0] for m in e.moves]
+        self.assertEqual(flags[0], keys.Mouse.LDOWN)
+        self.assertEqual(flags[-1], keys.Mouse.LUP)
+        f, x, y = e.moves[1]
+        self.assertEqual((x, y), e.mouse._abs(520, 380))
+        self.assertEqual(e.last_action["action"], "pan end")
+
+    def test_pan_keeps_a_space_already_held(self):
+        e = bare_engine()
+        e.pan_scale = lambda: (1.0, 1.0)
+        e.keys.down("space")
+        e.tablet_action("pan begin")
+        e.tablet_action("pan end")
+        self.assertEqual(e.keys.held, {"space"})
+
+    def test_fold_pen_and_snap(self):
+        e = bare_engine()
+        e.tablet_action("panel 0")
+        e.tablet_action("pen 1")
+        e.tablet_action("snap 0")
+        self.assertEqual(e.settings, [("panel_open", False), ("output", True), ("snap", False)])
+
+
+class PanelGeometry(unittest.TestCase):
+    def engine(self, **cfg):
+        e = bare_engine(cfg)
+        e.mapper = types.SimpleNamespace(oriented=lambda u, v: (u, v), uv=lambda x, y: (x, y))
+        return e
+
+    def pen(self, p, q):
+        return types.SimpleNamespace(x=p, y=q, in_range=True)
+
+    def test_open_panel_takes_its_strip(self):
+        e = self.engine(panel="left", panel_open=True)
+        f = core.PANEL_PX / 2160
+        self.assertAlmostEqual(e.panel_frac(), f)
+        self.assertTrue(e.over_panel(self.pen(f / 2, 0.9)))
+        self.assertFalse(e.over_panel(self.pen(f * 1.5, 0.5)))
+        self.assertAlmostEqual(e.effective_area()[0], f)
+
+    def test_folded_panel_leaves_only_the_tab(self):
+        e = self.engine(panel="left", panel_open=False)
+        self.assertEqual(e.panel_frac(), 0)
+        self.assertEqual(e.effective_area(), list(core.DEFAULTS["area"]))
+        self.assertTrue(e.over_panel(self.pen(0.02, 0.02)))
+        self.assertFalse(e.over_panel(self.pen(0.02, 0.5)))
+        self.assertFalse(e.over_panel(self.pen(0.1, 0.02)))
+
+    def test_right_panel_tab_is_top_right(self):
+        e = self.engine(panel="right", panel_open=False)
+        self.assertTrue(e.over_panel(self.pen(0.99, 0.02)))
+        self.assertFalse(e.over_panel(self.pen(0.01, 0.02)))
+
+
+class TapGestures(unittest.TestCase):
+    def test_clean_taps(self):
+        out = core.clean_taps({"1x3": {"t": "New layer", "keys": "Ctrl+Shift+Alt+N"}, "2x1": {"t": "X", "keys": "nope"},
+                               "9x9": {"t": "?", "keys": "a"}})
+        self.assertEqual(set(out), set(core.TAP_SLOTS))
+        self.assertEqual(out["1x3"], {"t": "New layer", "keys": "ctrl+shift+alt+n"})
+        self.assertEqual(out["2x1"], {"t": "", "keys": ""})
+        self.assertEqual(core.clean_taps(core.DEFAULT_TAPS), core.DEFAULT_TAPS)
+
+    def test_tap_sends_its_keys_and_toast(self):
+        e = bare_engine()
+        sent = []
+        e.companion = types.SimpleNamespace(running=True, send=sent.append)
+        e.tablet_action("tap 1 3")
+        self.assertEqual([vk for vk, up in e.sent if not up], [0x11, 0x10, 0x12, 0x4E])
+        self.assertEqual(sent, ["toast New layer"])
+        e.sent.clear()
+        e.tablet_action("tap 2 1")  # unassigned
+        e.tablet_action("tap 7 7")
+        self.assertEqual(e.sent, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,7 @@
+/* IBM Plex, SIL Open Font License 1.1 (fonts/OFL-IBM-Plex.txt). Bundled so the app works offline. */
+@font-face { font-family:"IBM Plex Sans"; font-weight:300; src:url("fonts/IBMPlexSans-Light.woff2") format("woff2"); }
+@font-face { font-family:"IBM Plex Sans"; font-weight:400; src:url("fonts/IBMPlexSans-Regular.woff2") format("woff2"); }
+@font-face { font-family:"IBM Plex Sans"; font-weight:500; src:url("fonts/IBMPlexSans-Medium.woff2") format("woff2"); }
+@font-face { font-family:"IBM Plex Sans"; font-weight:600; src:url("fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
+@font-face { font-family:"IBM Plex Mono"; font-weight:400; src:url("fonts/IBMPlexMono-Regular.woff2") format("woff2"); }
+@font-face { font-family:"IBM Plex Mono"; font-weight:600; src:url("fonts/IBMPlexMono-SemiBold.woff2") format("woff2"); }
