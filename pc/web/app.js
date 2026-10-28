@@ -23,6 +23,7 @@ function toast(text) {
 
 window.addEventListener("pywebviewready", async () => {
   for (let i = 0; i < 100 && !(await api().ready()); i++) await sleep(100);
+  $("#appVersion").textContent = await api().version();
   await refresh();
   if (S && !S.cfg.onboarded) Wizard.open();
   setInterval(refresh, 1000);

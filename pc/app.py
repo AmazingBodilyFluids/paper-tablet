@@ -14,9 +14,11 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import paths  # noqa: E402
+
 if sys.stderr is None or sys.executable.lower().endswith("pythonw.exe"):
-    # pythonw has no console: keep errors in a log next to the app
-    sys.stderr = sys.stdout = open(os.path.join(HERE, "paper-tablet.log"), "a", buffering=1, encoding="utf-8")
+    # pythonw has no console: keep errors in a log (where: paths.log_dir)
+    sys.stderr = sys.stdout = open(os.path.join(paths.log_dir(), "paper-tablet.log"), "a", buffering=1, encoding="utf-8")
     print(f"--- started {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 import rmtablet as rt  # noqa: E402
@@ -28,6 +30,7 @@ MONITORS = rt.monitors()
 import webview  # noqa: E402
 
 from core import Engine, use_profile_config  # noqa: E402
+from version import __version__  # noqa: E402
 
 CONFIG = use_profile_config()
 
@@ -84,6 +87,9 @@ class Api:
 
     def live(self):
         return self._engine.live() if self._engine else {"pen": None}
+
+    def version(self):
+        return __version__
 
     # ---- settings and actions
     def set(self, key, value):
