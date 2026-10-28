@@ -3,3 +3,5 @@ __pycache__/
 *.log
 pc/rmtablet.json
 data/
+installer/build/
+installer/dist/
