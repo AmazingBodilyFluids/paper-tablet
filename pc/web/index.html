@@ -169,6 +169,17 @@
             </div>
             <div class="readout" id="areaText"></div>
           </div>
+          <div class="pane">
+            <div class="pane-title">Pen mask</div>
+            <div class="opt"><div class="tx"><div class="t1">Use the mask</div><div class="t2">Shaded parts of the tablet screen hold the pen back, like a stencil: dark ignores it, white leaves it alone, grey is in between. <span id="maskInfo"></span></div></div>
+              <label class="switch"><input type="checkbox" data-key="mask_on"><span class="track"></span></label></div>
+            <div class="opt"><div class="tx"><div class="t1">Grey areas</div><div class="t2" id="maskModeHint"></div></div>
+              <div class="seg" data-key="mask_mode"><button data-v="fade">Fade</button><button data-v="gate">Firmer press</button></div></div>
+            <div class="opt"><div class="tx"><div class="t1">Make it from an image</div><div class="t2">Read in greyscale and fitted to the tablet screen: black masks, white stays open.</div></div>
+              <button class="btn" onclick="$('#maskFile').click()">Choose…</button><input type="file" id="maskFile" accept="image/*" hidden onchange="maskFromImage(this)"></div>
+            <div class="opt"><div class="tx"><div class="t1">Paint it on the tablet</div><div class="t2">While on, the pen paints full shading, the eraser end clears it, and one finger drags the whole mask. Windows gets no pen meanwhile.</div></div>
+              <div class="row"><button class="btn ghost" onclick="maskOp('invert')">Invert</button><button class="btn ghost" onclick="maskOp('clear')">Clear</button><label class="switch"><input type="checkbox" data-key="mask_edit"><span class="track"></span></label></div></div>
+          </div>
         </div>
         <div class="pane">
           <div class="pane-title">Tablet, as it sits on your desk</div>
@@ -183,6 +194,7 @@
       <h1>Pen feel</h1>
       <p class="lead">Shape how pressure comes through, and check the whole range reaches your apps.</p>
       <div class="grid2 mt2">
+        <div class="stack">
         <div class="pane">
           <div class="pane-title">Pressure curve</div>
           <canvas class="curve" id="curve"></canvas>
@@ -190,18 +202,6 @@
           <div class="scale" style="margin-left:144px;margin-right:78px"><span>softer: light touch draws dark</span><span>firmer</span></div>
           <div class="range-row mt"><span>Ignore light touch</span><input type="range" min="0" max="0.3" step="0.01" data-key="threshold" data-type="float"><span class="v" id="threshV"></span></div>
         </div>
-        <div class="stack">
-          <div class="pane">
-            <div class="pane-title">Full-range check</div>
-            <p class="hint">Press as hard as you comfortably can once. The bar should get near the end.</p>
-            <div class="meter mt"><i id="peakBar"></i></div>
-            <div class="row between mts"><span class="readout" id="peakText" style="margin:0"></span><button class="btn ghost" onclick="api().reset_peak()">Reset</button></div>
-          </div>
-          <div class="pane">
-            <div class="pane-title">Report rate</div>
-            <div class="readout" id="rateText" style="margin:0"></div>
-            <p class="hint mts">Every report from the tablet's digitizer goes to Windows as it arrives; there is no fixed frame rate in between. Draw a few strokes to measure.</p>
-          </div>
           <div class="pane">
             <div class="pane-title">Options</div>
             <div class="opt"><div class="tx"><div class="t1">Send pen tilt</div><div class="t2">For brushes that respond to angle</div></div>
@@ -217,6 +217,19 @@
               <div class="seg" data-key="snap_hold_ms"><button data-v="400">0.4 s</button><button data-v="600">0.6 s</button><button data-v="900">0.9 s</button></div></div>
             <div class="field mt"><span class="lbl">Only in these apps (program names, comma separated)</span><input class="input mono" data-key="snap_apps"></div>
             <p class="hint mts">The app swaps your stroke by pressing Ctrl+Z and drawing the clean shape, so it only snaps in drawing programs where Ctrl+Z undoes one stroke. <span id="snapLast"></span></p>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="pane">
+            <div class="pane-title">Full-range check</div>
+            <p class="hint">Press as hard as you comfortably can once. The bar should get near the end.</p>
+            <div class="meter mt"><i id="peakBar"></i></div>
+            <div class="row between mts"><span class="readout" id="peakText" style="margin:0"></span><button class="btn ghost" onclick="api().reset_peak()">Reset</button></div>
+          </div>
+          <div class="pane">
+            <div class="pane-title">Report rate</div>
+            <div class="readout" id="rateText" style="margin:0"></div>
+            <p class="hint mts">Every report from the tablet's digitizer goes to Windows as it arrives; there is no fixed frame rate in between. Draw a few strokes to measure.</p>
           </div>
           <div class="note"><svg><use href="#i-info"/></svg><div>Photoshop: turn on <b>Pen Pressure</b> for brush size or opacity. Krita and Clip Studio: choose <b>Windows Ink</b> as the tablet input.</div></div>
         </div>
@@ -252,15 +265,11 @@
               <option value="dots">Dots</option><option value="cross">Crosses</option><option value="blueprint">Blueprint (5 × 5)</option>
               <option value="isometric">Isometric</option></select></div>
           <div class="opt" style="display:block"><div class="range-row"><span>Line spacing</span><input type="range" min="3" max="15" step="0.5" data-key="paper_mm" data-type="float"><span class="v" id="paperV"></span></div></div>
-          <div class="opt"><div class="tx"><div class="t1">Tracing image</div><div class="t2" id="traceName">None. Show a photo or sketch under your strokes to trace over.</div></div>
+          <div class="opt"><div class="tx"><div class="t1">Tracing image</div><div class="t2 clip" id="traceName">None. Show a photo or sketch under your strokes to trace over.</div></div>
             <div class="row"><button class="btn" onclick="pickTrace()">Choose…</button><button class="btn ghost" id="traceDel" onclick="setKey('trace_file','').then(refresh)">Remove</button></div></div>
           <div class="opt" style="display:block"><div class="range-row"><span>Image strength</span><input type="range" min="0.1" max="1" step="0.05" data-key="trace_opacity" data-type="float"><span class="v" id="traceV"></span></div></div>
           <div class="opt"><div class="tx"><div class="t1">Move and zoom it on the tablet</div><div class="t2">While on, one finger drags the image and two fingers zoom it; gestures pause. It turns on by itself when you choose an image; tap the black note on the tablet to finish. A panel button can do this too ("Move image").</div></div>
             <div class="row"><button class="btn ghost" onclick="resetTrace()">Centre</button><label class="switch"><input type="checkbox" data-key="trace_adjust"><span class="track"></span></label></div></div>
-          <div class="opt"><div class="tx"><div class="t1">Trace mask</div><div class="t2">Shaded parts of the tablet screen ignore the pen, like a stencil, so you can only draw inside the shape you leave open. <span id="maskInfo"></span></div></div>
-            <label class="switch"><input type="checkbox" data-key="mask_on"><span class="track"></span></label></div>
-          <div class="opt"><div class="tx"><div class="t1">Paint the mask on the tablet</div><div class="t2">While on, the pen paints the shading, the eraser end clears it, and one finger drags the whole mask. Windows gets no pen meanwhile.</div></div>
-            <div class="row"><button class="btn ghost" onclick="maskOp('invert')">Invert</button><button class="btn ghost" onclick="maskOp('clear')">Clear</button><label class="switch"><input type="checkbox" data-key="mask_edit"><span class="track"></span></label></div></div>
           <div class="opt"><div class="tx"><div class="t1">Front light to full</div><div class="t2">Lights the screen evenly for tracing. It's a front light, so it lights the image on screen rather than shining through paper laid on top. Your light level comes back when the tablet screen turns off.</div></div>
             <label class="switch"><input type="checkbox" data-key="light"><span class="track"></span></label></div>
         </div>

@@ -125,9 +125,13 @@ function render() {
   $("#traceV").textContent = Math.round(S.cfg.trace_opacity * 100) + "%";
   const tf = S.cfg.trace_file || "";
   $("#traceName").textContent = tf ? tf.split(/[\\/]/).pop() : "None. Show a photo or sketch under your strokes to trace over.";
+  $("#traceName").title = tf;
   $("#traceDel").disabled = !tf;
-  const mk = S.cfg.mask || "", cells = [...mk].reduce((n, c) => n + [0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4][parseInt(c, 16)], 0);
-  $("#maskInfo").textContent = cells ? `${Math.round(100 * cells / (mk.length * 4))}% of the screen is masked.` : "Nothing masked yet.";
+  const mk = S.cfg.mask || "", shade = [...mk].reduce((n, c) => n + parseInt(c, 16), 0);
+  $("#maskInfo").textContent = shade ? `${Math.round(100 * shade / (mk.length * 15))}% of the screen is masked.` : "Nothing masked yet.";
+  $("#maskModeHint").textContent = S.cfg.mask_mode === "gate"
+    ? "The darker the grey, the harder you press before ink starts. Black: no pen."
+    : "Pressure is scaled by the shade: mid grey gives half, so half the opacity or size in a pressure brush. Black: no pen.";
   if (document.activeElement !== $("#trailR")) { $("#trailR").value = trailToSlider(S.cfg.trail_ms); paintRange($("#trailR")); }
   $("#trailV").textContent = trailText(S.cfg.trail_ms);
   $("#fitHint").textContent = {
@@ -1129,9 +1133,39 @@ async function resetTrace() {
 }
 
 async function maskOp(op) {
-  const n = 72 * 72 / 4, mk = (S.cfg.mask || "").padEnd(n, "0");
+  const n = 72 * 72, mk = (S.cfg.mask || "").padEnd(n, "0");
   await setKey("mask", op === "clear" ? "0".repeat(n) : [...mk].map(c => (15 - parseInt(c, 16)).toString(16)).join(""));
   refresh();
+}
+
+// An image as the pen mask: greyscale luminance, fitted to fill the tablet screen as it sits (cover),
+// one level 0 (white, open) .. f (black, masked) per cell.
+function maskFromImage(input) {
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+  const img = new Image(), url = URL.createObjectURL(file);
+  img.onload = async () => {
+    URL.revokeObjectURL(url);
+    const N = 72, [vw, vh] = S.view || [1, 1], k = Math.max(vw / img.width, vh / img.height);
+    const c = document.createElement("canvas"); c.width = c.height = N;
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff"; g.fillRect(0, 0, N, N);
+    const dw = img.width * k * N / vw, dh = img.height * k * N / vh;
+    g.drawImage(img, (N - dw) / 2, (N - dh) / 2, dw, dh);
+    const px = g.getImageData(0, 0, N, N).data;
+    let hex = "";
+    for (let i = 0; i < N * N; i++) {
+      const lum = (0.2126 * px[4 * i] + 0.7152 * px[4 * i + 1] + 0.0722 * px[4 * i + 2]) / 255;
+      hex += Math.round((1 - lum) * 15).toString(16);
+    }
+    await setKey("mask", hex);
+    if (!S.cfg.mask_on) await setKey("mask_on", true);
+    toast("Mask made from " + file.name + ".");
+    refresh();
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast("That file isn't an image the app can read."); };
+  img.src = url;
 }
 
 // Trail: 0.25-5 s, and one step past 5 s is "until cleared" (stored as 0, which the tablet keeps forever)

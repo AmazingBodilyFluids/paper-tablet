@@ -33,8 +33,10 @@ handle undo, redo, pan and zoom.
   (profiles) as you like, for example one per app, and switch with the arrows at the top of the panel.
 - **Paper and tracing on the tablet screen.** Lined, squared, dot, cross, blueprint or isometric paper under
   your strokes, and a tracing image you can move and zoom with your fingers. The front light can go to full
-  while you trace, and comes back to your level afterwards. A trace mask works like a stencil: paint the parts of
-  the screen that should ignore the pen, right on the tablet, and drag it where you need it.
+  while you trace, and comes back to your level afterwards.
+- **Pen mask (Screen area page).** Works like a stencil in shades of grey: black ignores the pen, white leaves it
+  alone, and grey either fades the pressure (mid grey gives half) or needs a firmer press. Paint it on the
+  tablet and drag it where you need it, or make it from any image, read in greyscale.
 - **Finger gestures:**
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.

@@ -10,6 +10,7 @@ gives the pen and the screen back to the notebook app a few seconds later (keepa
 rmpp-pen and rmpp-companion), so nothing is left behind on either side.
 """
 import collections
+import dataclasses
 import json
 import math
 import os
@@ -54,9 +55,10 @@ DEFAULTS = {
     "paper": "plain", "paper_mm": 5.0,
     "trace_file": "", "trace_opacity": 0.5, "trace_scale": 1.0, "trace_x": 0.0, "trace_y": 0.0,
     "trace_adjust": False, "light": False,
-    # trace mask: MASK_N x MASK_N cells over the tablet screen (hex, row by row); where a cell is set,
-    # the pen does nothing in Windows. Painted on the tablet itself in edit mode.
-    "mask": "", "mask_on": False, "mask_edit": False,
+    # pen mask: MASK_N x MASK_N cells over the tablet screen, one hex digit each (row by row): 0 open,
+    # f the pen does nothing in Windows, in between partly masked (mask_mode: "fade" scales the pressure
+    # down, "gate" needs a firmer press). Painted on the tablet in edit mode or made from an image.
+    "mask": "", "mask_on": False, "mask_edit": False, "mask_mode": "fade",
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
     "taps": None,           # tap gestures, filled from DEFAULT_TAPS below
@@ -100,15 +102,22 @@ FRONTLIGHT = "/sys/class/backlight/rm_frontlight"
 
 
 def clean_mask(h):
-    """A mask as exactly MASK_N * MASK_N / 4 lower-case hex digits (empty or bad input: nothing masked)."""
-    n = MASK_N * MASK_N // 4
-    h = "".join(c for c in str(h or "").lower() if c in "0123456789abcdef")[:n]
+    """A mask as exactly MASK_N * MASK_N lower-case hex digits, one level per cell (empty or bad
+    input: nothing masked). The old on / off format (four cells per digit) becomes 0 / f."""
+    n = MASK_N * MASK_N
+    h = "".join(c for c in str(h or "").lower() if c in "0123456789abcdef")
+    if len(h) == n // 4:
+        h = "".join("f" if (int(c, 16) >> (3 - k)) & 1 else "0" for c in h for k in range(4))
+    h = h[:n]
     return h + "0" * (n - len(h))
 
 
-def mask_bits(h):
-    """Hex mask -> bytes of 0 / 1, one per cell."""
-    return bytes((int(c, 16) >> (3 - k)) & 1 for c in clean_mask(h) for k in range(4))
+def mask_levels(h):
+    """Hex mask -> bytes of 0 (open) .. 15 (fully masked), one per cell."""
+    return bytes(int(c, 16) for c in clean_mask(h))
+
+
+MASK_MODES = ("fade", "gate")
 
 
 def clean_profiles(profiles, current=None):
@@ -487,8 +496,11 @@ class Worker(threading.Thread):
                         if down and not was_down:
                             e.on_tap((s.x, s.y))
                     elif pen_out is not None:
-                        if e.over_panel(s) or e.masked(s):
-                            s = rt.PenState()  # over the tablet's buttons: out of range for Windows
+                        level = e.mask_level(s)
+                        if e.over_panel(s) or level >= 15:
+                            s = rt.PenState()  # over the tablet's buttons or masked: out of range for Windows
+                        elif level:
+                            s = e.mask_pressure(s, level)
                         frames = self.translator.step(s)
                         if snap:
                             frames = self.snapper.feed(s, frames)
@@ -572,7 +584,7 @@ class Engine:
         self.last_action = None
         self.touch = None       # the latest finger report from the tablet, for the live view
         self.touch_out = None   # WindowsTouch, made when a profile first uses Windows touch
-        self.mask = mask_bits(self.cfg.get("mask"))
+        self.mask = mask_levels(self.cfg.get("mask"))
         self.rate = RateMeter()
         self.mapper = None
         self.refresh_mapper()
@@ -691,7 +703,9 @@ class Engine:
                 val = float(val)
             if key == "mask":
                 val = clean_mask(val)
-                self.mask = mask_bits(val)
+                self.mask = mask_levels(val)
+            if key == "mask_mode" and val not in MASK_MODES:
+                val = "fade"
             self.cfg[key] = val
             self.refresh_mapper()
             self.save()
@@ -736,17 +750,36 @@ class Engine:
             a = list(self.cfg["area"])
         return a
 
-    def masked(self, s):
-        """Is the pen over the trace mask (or is the mask being painted)? Then Windows doesn't get it."""
+    def mask_level(self, s):
+        """How masked the pen's spot is, 0 (open) .. 15 (Windows doesn't get the pen). Painting the
+        mask on the tablet counts as fully masked everywhere."""
         if not s.in_range or not self.mapper or self.cal is not None:
-            return False
+            return 0
         if self.cfg.get("mask_edit") and self.companion.running:
-            return True
+            return 15
         if not self.cfg.get("mask_on"):
-            return False
+            return 0
         p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
         c, r = min(MASK_N - 1, max(0, int(p * MASK_N))), min(MASK_N - 1, max(0, int(q * MASK_N)))
-        return self.mask[r * MASK_N + c] == 1
+        return self.mask[r * MASK_N + c]
+
+    def masked(self, s):
+        return self.mask_level(s) >= 15
+
+    def mask_pressure(self, s, level):
+        """The pen over a partly masked spot. fade: pressure scaled down by the shade (a mid grey
+        halves it, so half the opacity or size in a pressure brush); gate: the shade is a pressure
+        threshold, so it takes a firmer press to draw there, starting from nothing."""
+        a = self.mapper.absinfo.get("PRESSURE") if self.mapper else None
+        if not a or not level:
+            return s
+        lo, span, f = a["min"], (a["max"] - a["min"]) or 1, level / 15
+        n = min(1.0, max(0.0, (s.pressure - lo) / span))
+        if self.cfg.get("mask_mode") == "gate":
+            n = 0.0 if n <= f else (n - f) / (1 - f)
+        else:
+            n *= 1 - f
+        return dataclasses.replace(s, pressure=int(round(lo + n * span)))
 
     def over_panel(self, s):
         """Is the pen above the tablet's side panel? Then it presses buttons there, not in Windows."""

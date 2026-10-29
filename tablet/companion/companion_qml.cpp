@@ -61,7 +61,7 @@ Window {
     // trace mask: a 72 x 72 grid over the view; set cells are where the pen does nothing in Windows.
     // In edit mode the pen paints cells (eraser end clears) and one finger drags the whole mask.
     readonly property int maskN: 72
-    property var maskBits: []            // maskN * maskN of 0 / 1, row by row
+    property var maskBits: []            // maskN * maskN levels 0 (open) .. 15 (pen ignored), row by row
     property bool maskOn: false
     property bool maskEdit: false
     property var maskRuns: []            // [row, first col, last col] runs, what the overlay draws
@@ -202,31 +202,31 @@ Window {
     }
 
     // ---- trace mask
-    function maskFromHex(h) {
+    function maskFromHex(h) {  // one hex digit per cell
         var n = maskN * maskN, out = new Array(n)
-        for (var i = 0; i < n; i++) {
-            var d = parseInt(h.charAt(i >> 2), 16) || 0
-            out[i] = (d >> (3 - (i & 3))) & 1
-        }
+        for (var i = 0; i < n; i++) out[i] = parseInt(h.charAt(i), 16) || 0
         return out
     }
     function maskHex() {
         var s = "", n = maskN * maskN
-        for (var i = 0; i < n; i += 4)
-            s += ((maskBits[i] << 3) | (maskBits[i + 1] << 2) | (maskBits[i + 2] << 1) | maskBits[i + 3]).toString(16)
+        for (var i = 0; i < n; i++) s += maskBits[i].toString(16)
         return s
     }
-    function maskRedraw() {
+    function maskRedraw() {  // runs of one level: [row, first col, last col, level]
         var runs = []
         for (var r = 0; r < maskN; r++) {
-            var c0 = -1
+            var c0 = -1, lv = 0
             for (var c = 0; c <= maskN; c++) {
-                var on = c < maskN && maskBits[r * maskN + c]
-                if (on && c0 < 0) c0 = c
-                if (!on && c0 >= 0) { runs.push([r, c0, c - 1]); c0 = -1 }
+                var v = c < maskN ? maskBits[r * maskN + c] : 0
+                if (c0 >= 0 && v !== lv) { runs.push([r, c0, c - 1, lv]); c0 = -1 }
+                if (v && c0 < 0) { c0 = c; lv = v }
             }
         }
         maskRuns = runs
+    }
+    function maskGrey(level) {  // open: no shade; full: mid grey (darker while editing)
+        var g = Math.round(255 - level / 15 * (maskEdit ? 153 : 102))
+        return Qt.rgba(g / 255, g / 255, g / 255, 1)
     }
     function maskPaint(p, value) {  // a round brush, 2 cells across each way
         var cx = Math.floor(p.x / view.width * maskN), cy = Math.floor(p.y / view.height * maskN), hit = false
@@ -361,7 +361,7 @@ Window {
         }
         if (maskEdit && mode === "ink") {  // painting the mask: the pen stays on the tablet
             endStroke()
-            if (touching) { maskPaint(p, eraser ? 0 : 1); maskDirty = true }
+            if (touching) { maskPaint(p, eraser ? 0 : 15); maskDirty = true }
             else if (maskDirty) { maskDirty = false; maskRedraw(); act("mask " + maskHex()) }
             return
         }
@@ -683,7 +683,7 @@ Window {
                         x: modelData[1] * view.width / win.maskN; y: modelData[0] * view.height / win.maskN
                         width: (modelData[2] - modelData[1] + 1) * view.width / win.maskN + 0.5
                         height: view.height / win.maskN + 0.5
-                        color: win.maskEdit ? "#999999" : "#cccccc"; antialiasing: false
+                        color: win.maskGrey(modelData[3]); antialiasing: false
                     }
                 }
             }

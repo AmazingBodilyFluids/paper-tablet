@@ -233,23 +233,40 @@ class TraceMask(Profiles):
     def state(self, x, y):
         return rt.PenState(x=x, y=y, pen=True)
 
-    def test_mask_round_trip_and_hit_test(self):
-        e = self.engine()
+    def masked_engine(self, **cfg):
+        e = self.engine(cfg)
         e.mapper = rt.Mapper(absinfo={"X": {"min": 0, "max": 7199}, "Y": {"min": 0, "max": 7199},
                                       "PRESSURE": {"min": 0, "max": 4096}}, monitor=(0, 0, 1920, 1080), fit="stretch")
         e.cal = None
-        bits = bytearray(core.MASK_N * core.MASK_N)
-        bits[0] = 1                      # top-left cell
-        bits[10 * core.MASK_N + 20] = 1  # row 10, column 20
-        h = "".join(f"{(bits[i] << 3) | (bits[i+1] << 2) | (bits[i+2] << 1) | bits[i+3]:x}" for i in range(0, len(bits), 4))
-        e.tablet_action("mask " + h)
+        return e
+
+    def test_mask_round_trip_and_hit_test(self):
+        e = self.masked_engine()
+        lv = bytearray(core.MASK_N * core.MASK_N)
+        lv[0] = 15                      # top-left cell
+        lv[10 * core.MASK_N + 20] = 15  # row 10, column 20
+        lv[10 * core.MASK_N + 22] = 8   # a grey cell
+        e.tablet_action("mask " + "".join(f"{v:x}" for v in lv))
         self.assertTrue(e.cfg["mask_on"])  # painting a mask switches it on
-        self.assertEqual(core.mask_bits(e.cfg["mask"]), bytes(bits))
+        self.assertEqual(core.mask_levels(e.cfg["mask"]), bytes(lv))
         self.assertTrue(e.masked(self.state(50, 50)))
         self.assertTrue(e.masked(self.state(20 * 100 + 50, 10 * 100 + 50)))
         self.assertFalse(e.masked(self.state(21 * 100 + 50, 10 * 100 + 50)))
+        self.assertEqual(e.mask_level(self.state(22 * 100 + 50, 10 * 100 + 50)), 8)
         e.set("mask_on", False)
         self.assertFalse(e.masked(self.state(50, 50)))
+
+    def test_grey_fades_or_gates_the_pressure(self):
+        e = self.masked_engine()
+        s = rt.PenState(x=1, y=1, pen=True, touch=True, pressure=2048)
+        self.assertEqual(e.mask_pressure(s, 0).pressure, 2048)
+        self.assertEqual(e.mask_pressure(s, 15).pressure, 0)
+        self.assertEqual(e.mask_pressure(s, 5).pressure, round(2048 * 10 / 15))  # fade: a third lighter
+        e.set("mask_mode", "gate")
+        self.assertEqual(e.mask_pressure(s, 9).pressure, 0)      # below the 60% threshold: no ink
+        self.assertEqual(e.mask_pressure(s, 3).pressure, round(4096 * (0.5 - 0.2) / 0.8))
+        e.set("mask_mode", "bogus")
+        self.assertEqual(e.cfg["mask_mode"], "fade")
 
     def test_editing_keeps_the_pen_from_windows(self):
         e = self.engine({"mask_edit": True})
@@ -257,8 +274,12 @@ class TraceMask(Profiles):
         self.assertTrue(e.masked(self.state(1, 1)))
 
     def test_bad_masks_are_cleaned(self):
-        self.assertEqual(len(core.clean_mask("zz12")), core.MASK_N * core.MASK_N // 4)
+        self.assertEqual(len(core.clean_mask("zz12")), core.MASK_N * core.MASK_N)
         self.assertEqual(core.clean_mask("F")[0], "f")
+
+    def test_old_on_off_masks_become_levels(self):
+        old = "8" + "0" * (core.MASK_N * core.MASK_N // 4 - 1)  # only the first cell set
+        self.assertEqual(core.clean_mask(old)[:5], "f0000")
 
 
 class PanelGeometry(unittest.TestCase):
