@@ -461,8 +461,12 @@ Window {
         var out = ["touch", gMode === "dead" || traceAdjust || maskEdit ? "dead" : "live", Object.keys(palms).length]
         for (var id in gPts)
             out.push(id, (gPts[id].x / view.width).toFixed(4), (gPts[id].y / view.height).toFixed(4))
-        act(out.join(" "))
+        var line = out.join(" ")
+        if (line === lastTouch) return  // a resting finger repeats itself many times a second
+        lastTouch = line
+        act(line)
     }
+    property string lastTouch: ""
     function fingersChanged() {
         if (maskEdit) { maskFingers(); return }
         if (traceAdjust) { adjustChanged(); return }
