@@ -153,8 +153,20 @@ int main(int argc, char **argv) {
             fprintf(stderr, "companion: first frame drawn (%dx%d)\n", w->width(), w->height());
             // The epaper plugin is certainly loaded by now; add the pen-mode area (GUI thread).
             QMetaObject::invokeMethod(w, [w] {
-                if (auto *ink = w->findChild<QQuickItem *>("ink")) make_pen_mode_item(ink);
-                else fprintf(stderr, "companion: pen mode: ink item missing\n");
+                if (auto *ink = w->findChild<QQuickItem *>("ink")) {
+                    // Hand the item and its mode numbers to QML, which switches to Content mode
+                    // briefly when the paper, tracing image or mask change (Pen mode only
+                    // flushes on pen activity).
+                    if (QQuickItem *pm = make_pen_mode_item(ink)) {
+                        QMetaEnum e = pm->metaObject()->property(pm->metaObject()->indexOfProperty("mode")).enumerator();
+                        for (auto [key, prop] : {std::pair{"Pen", "modePen"}, {"UI", "modeUI"}, {"Content", "modeContent"}}) {
+                            bool ok = false;
+                            int v = e.keyToValue(key, &ok);
+                            w->setProperty(prop, ok ? v : -1);
+                        }
+                        w->setProperty("penModeItem", QVariant::fromValue<QObject *>(pm));
+                    }
+                } else fprintf(stderr, "companion: pen mode: ink item missing\n");
             }, Qt::QueuedConnection);
         }, Qt::DirectConnection);
     }

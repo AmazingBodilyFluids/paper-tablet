@@ -68,6 +68,36 @@ Window {
     property real maskDX: 0              // live finger drag while editing, in view pixels
     property real maskDY: 0
     property int profileCount: 1
+    // E-paper update mode of the ink area (main.cpp hands over its EPScreenModeItem and the mode
+    // numbers). Pen mode only flushes on pen activity, so other changes to what is under the ink
+    // (paper, tracing image, mask, area) get a short switch to Content mode to reach the panel.
+    property var penModeItem: null
+    property int modePen: -1
+    property int modeUI: -1
+    property int modeContent: -1
+    property bool epRefreshing: false
+    function epMode() {
+        if (!penModeItem) return
+        var m = penDown ? modePen : epRefreshing ? modeContent : traceAdjust && modeUI >= 0 ? modeUI : modePen
+        if (m >= 0 && penModeItem.mode !== m) penModeItem.mode = m
+    }
+    function refreshScreen() { epDebounce.restart() }
+    onPaperChanged: refreshScreen()
+    onPaperStepChanged: refreshScreen()
+    onTraceSrcChanged: refreshScreen()
+    onTraceOpacityChanged: refreshScreen()
+    onTraceScaleChanged: refreshScreen()
+    onTraceXChanged: refreshScreen()
+    onTraceYChanged: refreshScreen()
+    onTraceAdjustChanged: { epMode(); refreshScreen() }
+    onMaskOnChanged: refreshScreen()
+    onMaskEditChanged: refreshScreen()
+    onMaskRunsChanged: refreshScreen()
+    onMaskDXChanged: refreshScreen()
+    onMaskDYChanged: refreshScreen()
+    onAreaChanged: refreshScreen()
+    onModeChanged: refreshScreen()
+    onPenDownChanged: epMode()
     readonly property real footH: 190
     readonly property int rows: 8
     readonly property real cellW: panelW / 2
@@ -222,10 +252,18 @@ Window {
         var l = gList()
         if (l.length === 1 && !maskDrag) maskDrag = {x: l[0].x, y: l[0].y}
         if (l.length === 0 && maskDrag) {
+            if (Math.abs(maskDX) + Math.abs(maskDY) < 20 && hintHit(maskHint, maskDrag)) {
+                maskDX = 0; maskDY = 0; maskDrag = null; act("maskedit"); return  // "tap here when done"
+            }
             var dx = Math.round(maskDX / view.width * maskN), dy = Math.round(maskDY / view.height * maskN)
             maskDX = 0; maskDY = 0; maskDrag = null
             if (dx || dy) { maskShift(dx, dy); act("mask " + maskHex()) }
         }
+    }
+    function hintHit(item, p) {
+        if (!item.visible) return false
+        var q = item.mapFromItem(view, p.x, p.y)
+        return q.x >= -20 && q.y >= -20 && q.x < item.width + 20 && q.y < item.height + 20
     }
     function maskFingerMoved() {
         var l = gList()
@@ -436,21 +474,36 @@ Window {
             win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged(); win.sendTouch()
         }
     }
+    Timer {  // changes settle, then one Content-mode pass (not while the pen is drawing)
+        id: epDebounce; interval: 250
+        onTriggered: {
+            if (!win.penModeItem) return
+            if (win.penDown) { restart(); return }
+            win.epRefreshing = true; win.epMode(); epNudge.flip = !epNudge.flip; win.requestUpdate(); epBack.restart()
+        }
+    }
+    Timer { id: epBack; interval: 900; onTriggered: { win.epRefreshing = false; win.epMode() } }
     Timer { id: tapTimer; interval: 330; onTriggered: { if (win.tapK > 0) win.act("tap " + win.tapN + " " + win.tapK); win.tapK = 0 } }
     // Adjusting the tracing image: one finger drags it, two zoom it (about its centre).
     property var adj: null         // {c, d, x, y, s} where the current finger count began
     function adjustChanged() {
         var l = gList(), n = l.length
         if (n === 0) {
-            if (adj) act("trace " + traceX.toFixed(1) + " " + traceY.toFixed(1) + " " + traceScale.toFixed(4))
+            if (adj && adj.tap && adj.moved < 20 && hintHit(traceHint, adj.c)) {
+                traceX = adj.x; traceY = adj.y; traceScale = adj.s
+                act("traceadjust")  // "tap here when done"
+            } else if (adj) act("trace " + traceX.toFixed(1) + " " + traceY.toFixed(1) + " " + traceScale.toFixed(4))
             adj = null; gMode = ""; gMax = 0; return
         }
-        adj = {c: centroid(l), d: n > 1 ? spread(l) : 0, x: traceX, y: traceY, s: traceScale}
+        var first = !adj
+        adj = {c: centroid(l), d: n > 1 ? spread(l) : 0, x: traceX, y: traceY, s: traceScale,
+               tap: first ? n === 1 : false, moved: 0}
     }
     function adjustMoved() {
         var l = gList()
         if (!adj || !l.length) return
         var c = centroid(l)
+        adj.moved = Math.max(adj.moved, Math.abs(c.x - adj.c.x) + Math.abs(c.y - adj.c.y))
         traceX = adj.x + c.x - adj.c.x
         traceY = adj.y + c.y - adj.c.y
         if (l.length > 1 && adj.d > 20) traceScale = Math.max(0.05, Math.min(20, adj.s * spread(l) / adj.d))
@@ -619,20 +672,24 @@ Window {
                 visible: win.maskEdit; anchors.fill: parent; anchors.margins: 6
                 color: "transparent"; border.width: 6; border.color: "black"
                 Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: mhint.width + 40; height: 60
+                    id: maskHint
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: mhint.width + 40; height: mhint.height + 24
                     color: "black"; radius: 12
                     Text { id: mhint; anchors.centerIn: parent; color: "white"; font.pixelSize: 26; font.bold: true
-                           text: "Editing the mask: pen paints, eraser clears, 1 finger moves it" }
+                           horizontalAlignment: Text.AlignHCenter
+                           text: "Editing the mask: pen paints, eraser clears, 1 finger moves it\nTap here when done" }
                 }
             }
             Rectangle {  // while adjusting: a frame says fingers move the image
                 visible: win.traceAdjust; anchors.fill: parent; anchors.margins: 6
                 color: "transparent"; border.width: 6; border.color: "black"
                 Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: hint.width + 40; height: 60
+                    id: traceHint
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: hint.width + 40; height: hint.height + 24
                     color: "black"; radius: 12
                     Text { id: hint; anchors.centerIn: parent; color: "white"; font.pixelSize: 26; font.bold: true
-                           text: "Moving the image: 1 finger drags, 2 fingers zoom" }
+                           horizontalAlignment: Text.AlignHCenter
+                           text: "Moving the image: 1 finger drags, 2 fingers zoom\nTap here when done" }
                 }
             }
         }
@@ -684,6 +741,10 @@ Window {
         }
 
         Item { id: ink; objectName: "ink"; anchors.fill: parent }
+        Rectangle {  // one pixel that changes on each refresh, so the scene graph has a frame to send
+            id: epNudge; property bool flip: false
+            x: view.width - 1; y: view.height - 1; width: 1; height: 1; color: flip ? "#fefefe" : "white"
+        }
 
         Rectangle {  // active area that maps to the monitor
             visible: win.mode === "ink"

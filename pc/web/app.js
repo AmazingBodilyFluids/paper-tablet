@@ -1117,7 +1117,10 @@ Panel.init();
 // ------------------------------------------------------------------ tracing image
 async function pickTrace() {
   const path = await api().pick_trace_image();
-  if (path) { await resetTrace(); toast("Tracing image sent to the tablet."); }
+  if (path) {
+    await resetTrace(); await setKey("trace_adjust", true);
+    toast("Image sent. Drag it with one finger, pinch to zoom, then tap the black note on the tablet when done.");
+  }
   refresh();
 }
 async function resetTrace() {

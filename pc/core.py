@@ -704,6 +704,7 @@ class Engine:
             self.sync_companion()
         if key == "light" and self.companion.running:
             threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
+            self.companion.send("toast Front light: " + ("full" if val else "back to your level"))
         if key == "panel_profile" and self.companion.running:
             self.companion.send("unlatch")
             self.companion.send("toast " + self.cfg["panel_profiles"][self.cfg["panel_profile"]]["name"])
