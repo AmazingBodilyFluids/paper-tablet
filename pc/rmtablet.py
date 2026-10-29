@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rmtablet: use a reMarkable Paper Pro as a Windows Ink pen tablet.
+rmtablet: use a reMarkable tablet (Paper Pro; reMarkable 2 and 1 in beta) as a Windows Ink pen tablet.
 
 Pipeline:  tablet /dev/input/eventN  --ssh-->  evdev parser  -->  pen state machine
            -->  coordinate mapper  -->  Windows synthetic pen (InjectSyntheticPointerInput)
