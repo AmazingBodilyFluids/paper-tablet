@@ -126,6 +126,7 @@ function render() {
   const tf = S.cfg.trace_file || "";
   $("#traceName").textContent = tf ? tf.split(/[\\/]/).pop() : "None. Show a photo or sketch under your strokes to trace over.";
   $("#traceName").title = tf;
+  $("#maskConV").textContent = "×" + (S.cfg.mask_contrast || 1);
   $("#traceDel").disabled = !tf;
   const mk = S.cfg.mask || "", shade = [...mk].reduce((n, c) => n + parseInt(c, 16), 0);
   $("#maskInfo").textContent = shade ? `${Math.round(100 * shade / (mk.length * 15))}% of the screen is masked.` : "Nothing masked yet.";
@@ -222,6 +223,7 @@ document.addEventListener("input", e => {
     S.cfg[el.dataset.key] = v;
     if (el.dataset.key === "paper_mm") $("#paperV").textContent = v.toFixed(1).replace(/\.0$/, "") + " mm";
     if (el.dataset.key === "trace_opacity") $("#traceV").textContent = Math.round(v * 100) + "%";
+    if (el.dataset.key === "mask_contrast") { $("#maskConV").textContent = "×" + v; drawTablet($("#mapPreview")); }
     if (el.dataset.key === "gamma") $("#gammaV").textContent = v.toFixed(2);
     if (el.dataset.key === "threshold") $("#threshV").textContent = Math.round(v * 100) + "%";
     drawCurve();
@@ -483,6 +485,8 @@ function maskRender(src) {
 function drawMask(ctx, f) {
   const src = maskSource(), lv = src.s === 1 && !src.ox && !src.oy && src.grid
     ? Uint8Array.from(src.hex, ch => parseInt(ch, 16)) : maskRender(src);
+  const k = S.cfg.mask_contrast || 1;
+  for (let i = 0; i < lv.length; i++) lv[i] = Math.max(0, Math.min(15, Math.floor(8 + (lv[i] - 7.5) * k)));
   if (!lv.some(v => v)) return;
   const c = document.createElement("canvas"); c.width = c.height = MASK_N;
   const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N), a = S.cfg.mask_on ? 0.7 : 0.3;

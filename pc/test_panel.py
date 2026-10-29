@@ -277,6 +277,19 @@ class TraceMask(Profiles):
         self.assertEqual(len(core.clean_mask("zz12")), core.MASK_N * core.MASK_N)
         self.assertEqual(core.clean_mask("F")[0], "f")
 
+    def test_contrast_applies_over_the_stored_mask(self):
+        e = self.masked_engine()
+        raw = "4" * 10 + "b" * 10
+        e.set("mask", raw)
+        e.set("mask_contrast", 2.0)
+        e.set("mask_on", True)
+        self.assertEqual(core.mask_contrasted(raw, 2)[:20], "1" * 10 + "f" * 10)
+        self.assertEqual(e.mask_level(self.state(50, 50)), 1)
+        self.assertEqual(e.cfg["mask"][:20], raw)          # stored as it was
+        shown = core.mask_contrasted(e.cfg["mask"], 2)
+        e.tablet_action("mask " + "f" + shown[1:])         # the tablet painted one cell
+        self.assertEqual(e.cfg["mask"][:20], "f" + raw[1:])
+
     def test_old_on_off_masks_become_levels(self):
         old = "8" + "0" * (core.MASK_N * core.MASK_N // 4 - 1)  # only the first cell set
         self.assertEqual(core.clean_mask(old)[:5], "f0000")
