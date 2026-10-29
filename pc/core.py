@@ -82,6 +82,9 @@ DEFAULT_TAPS = {"1x2": {"t": "", "keys": ""}, "1x3": {"t": "New layer", "keys": 
                 "2x1": {"t": "", "keys": ""}, "2x2": {"t": "", "keys": ""}, "3x1": {"t": "", "keys": ""}}
 DEFAULTS["taps"] = DEFAULT_TAPS
 BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "trace", "light", "none")
+# fingers: "shortcuts" turns gestures into keys (pan = Space+drag ...); "windows" hands every
+# contact to Windows as real touch, so apps do their own scrolling, zooming and inertia
+TOUCH_MODES = ("shortcuts", "windows")
 PAPERS = ("plain", "lined", "squared", "dots", "cross", "blueprint", "isometric")
 PANEL_PX_PER_MM = 2160 / 239.6  # Paper Pro: 1620 x 2160 px on a 179.7 x 239.6 mm panel (229 ppi)
 TRACE_MAX_BYTES = 30 * 1024 * 1024
@@ -94,8 +97,9 @@ def clean_profiles(profiles, current=None):
     for i, p in enumerate(list(profiles or [])[:50]):
         p = p if isinstance(p, dict) else {}
         name = " ".join(str(p.get("name") or "").split())[:24] or f"Profile {i + 1}"
-        out.append({"name": name, "buttons": clean_buttons(p.get("buttons"))})
-    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS)}]
+        touch = p.get("touch") if p.get("touch") in TOUCH_MODES else "shortcuts"
+        out.append({"name": name, "buttons": clean_buttons(p.get("buttons")), "touch": touch})
+    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS), "touch": "shortcuts"}]
 
 
 def load_profiles(cfg):
@@ -544,6 +548,8 @@ class Engine:
         self.mouse = keys.Mouse()
         self.pan_space = False
         self.last_action = None
+        self.touch = None       # the latest finger report from the tablet, for the live view
+        self.touch_out = None   # WindowsTouch, made when a profile first uses Windows touch
         self.rate = RateMeter()
         self.mapper = None
         self.refresh_mapper()
@@ -584,7 +590,7 @@ class Engine:
                            "number": self.cal_number(self.cal["mode"], i), "prompt": self.cal_prompt(self.cal["mode"], i),
                            "targets": self.cal_targets(self.cal["mode"])}
         return {
-            "cfg": self.cfg, "status": {"kind": self.status[0], "text": self.status[1]},
+            "cfg": self.cfg, "touch_mode": self.touch_mode(), "status": {"kind": self.status[0], "text": self.status[1]},
             "link": self.link, "ssh": self.ssh_port, "connected": self.connected,
             "output": self.output_on, "screen": self.companion.running,
             "device": self.pen and {"name": self.pen["name"], "kernel": self.info.get("release", ""),
@@ -602,19 +608,25 @@ class Engine:
         }
 
     def live(self):
+        out = {"pen": None}
+        t, a = self.touch, self.last_action
+        if t and (t["pts"] or time.time() - t["at"] < 0.5):
+            out["touch"] = t
+        if a and time.time() - a["at"] < 1.5:
+            out["gesture"] = a["action"]
         w = self.worker
         s = w.latest if w else None
         if s is None or not s.in_range or self.pen is None:
-            return {"pen": None}
+            return out
         p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
         touching = s.touch or s.pressure > 0
-        out = self.mapper.pressure(s.pressure) if touching else 0
+        pressure = self.mapper.pressure(s.pressure) if touching else 0
         tx, ty = self.mapper.tilt_xy(s.tilt_x, s.tilt_y)
         sx, sy = self.mapper.to_screen(s.x, s.y)
         if s.pressure > self.peak:
             self.peak = s.pressure
-        return {"pen": {"p": p, "q": q, "touching": bool(touching), "eraser": bool(s.rubber), "raw": s.pressure,
-                        "out": out, "tilt": [tx, ty], "screen": [sx, sy]}, "peak": self.peak}
+        return dict(out, pen={"p": p, "q": q, "touching": bool(touching), "eraser": bool(s.rubber), "raw": s.pressure,
+                              "out": pressure, "tilt": [tx, ty], "screen": [sx, sy]}, peak=self.peak)
 
     # ------------------------------------------------------------------ settings
 
@@ -742,6 +754,9 @@ class Engine:
         if not parts:
             return
         name, arg = parts[0], parts[1] if len(parts) > 1 else ""
+        if name == "touch":  # many per second: not an action for the activity line
+            self.on_touch(parts)
+            return
         if name in ("press", "release") and arg.isdigit():
             btns = self.buttons()
             i = int(arg)
@@ -1086,7 +1101,7 @@ class Engine:
         c.send(f"panel {self.cfg.get('panel', 'left') if shown else 'off'} {PANEL_PX / self.view_size()[0]:.4f}")
         c.send(f"panelopen {int(bool(self.cfg.get('panel_open', True)))}")
         c.send(f"gestures {int(bool(self.cfg.get('gestures', True)))} {int(self.cfg.get('swipe_step', 100))} "
-                   f"{float(self.cfg.get('palm_size', 0))}")
+               f"{float(self.cfg.get('palm_size', 0))} {int(self.touch_mode() == 'windows')}")
         c.send("buttons " + json.dumps(self.companion_buttons(), separators=(",", ":")))
         profs = self.cfg["panel_profiles"]
         c.send(f"profile {self.cfg['panel_profile']} {len(profs)} {profs[self.cfg['panel_profile']]['name']}")
@@ -1212,7 +1227,34 @@ class Engine:
     def finish_onboarding(self):
         self.set("onboarded", True)
 
+    def touch_mode(self):
+        return self.cfg["panel_profiles"][self.cfg["panel_profile"]].get("touch", "shortcuts")
+
+    def on_touch(self, parts):
+        """'touch live|dead <palms> id p q ...' from the tablet: keep it for the live view and, in
+        Windows-touch mode, pass the contacts on (dead = the pen or a palm took over: lift all)."""
+        try:
+            live, palms = parts[1] == "live", int(parts[2])
+            pts = [(parts[i], float(parts[i + 1]), float(parts[i + 2])) for i in range(3, len(parts) - 2, 3)]
+        except (IndexError, ValueError):
+            return
+        self.touch = {"live": live, "palms": palms, "pts": [[p, q] for _, p, q in pts], "at": time.time()}
+        if self.touch_mode() != "windows" or self.mapper is None:
+            if self.touch_out:
+                self.touch_out.lift_all()
+            return
+        if self.touch_out is None:
+            try:
+                self.touch_out = rt.WindowsTouch() if sys.platform == "win32" else None
+            except OSError as ex:
+                self.set_status("error", f"Windows touch isn't available: {ex}")
+                return
+        if self.touch_out:
+            self.touch_out.update({cid: self.mapper.frac_to_screen(p, q) for cid, p, q in pts} if live else {})
+
     def shutdown(self):
+        if self.touch_out:
+            self.touch_out.close()
         self.mouse.end()
         self.keys.release_all()
         self._stop.set()

@@ -378,9 +378,10 @@ function drawLive() {
     const ctx = cv.getContext("2d");
     ctx.putImageData(statics[id], 0, 0);
     const p = LIVE.pen;
-    if (!p) continue;
     const d = window.devicePixelRatio || 1, w = cv.width / d, h = cv.height / d;
     const f = frameRect(w, h);
+    drawFingers(ctx, f);
+    if (!p) continue;
     const x = f.x + p.p * f.w, y = f.y + p.q * f.h;
     if (S.cfg.tilt && p.tilt) {
       ctx.strokeStyle = "rgba(20,30,40,0.55)"; ctx.lineWidth = 2; ctx.lineCap = "round";
@@ -392,8 +393,8 @@ function drawLive() {
     if (p.touching) { ctx.fillStyle = col; ctx.fill(); }
     ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
   }
-  const p = LIVE.pen;
-  $("#homeReadout").innerHTML = p
+  const p = LIVE.pen, g = gestureText();
+  $("#homeReadout").innerHTML = g ? `<span><b>fingers</b> ${esc(g)}</span>` : p
     ? `<span><b>${p.eraser ? "eraser" : "pen"}</b> ${p.touching ? "down" : "hover"}</span><span><b>pressure</b> ${Math.round(p.out / 10.24)}%</span>` +
       `<span><b>tilt</b> ${p.tilt[0]}°, ${p.tilt[1]}°</span><span><b>display</b> ${p.screen[0]}, ${p.screen[1]}</span>`
     : (S && S.connected ? "<span>Hover the pen over the tablet</span>" : "");
@@ -403,6 +404,32 @@ function drawLive() {
     $("#peakText").textContent = peak ? `Highest: ${Math.round(100 * peak / max)}% of the pen's range` : "Not pressed yet";
     if (p && p.touching) drawCurve(p.raw);
   }
+}
+
+// Fingers on the tablet: a ring per contact, grey when the pen or a palm has muted them.
+function drawFingers(ctx, f) {
+  const t = LIVE.touch;
+  if (!t || !t.pts.length) return;
+  ctx.lineWidth = 3;
+  for (const [p, q] of t.pts) {
+    const x = f.x + p * f.w, y = f.y + q * f.h;
+    ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2);
+    ctx.strokeStyle = t.live ? C.area : C.grid;
+    ctx.fillStyle = t.live ? "rgba(120,170,255,0.25)" : "rgba(128,128,128,0.2)";
+    ctx.fill(); ctx.stroke();
+  }
+}
+const GESTURES = { undo: "swipe: undo", redo: "swipe: redo", zoomin: "pinch: zoom in", zoomout: "pinch: zoom out",
+  "pan begin": "pan", "pan end": "pan", "rotate begin": "twist: rotate", "rotate end": "twist: rotate",
+  "profile next": "next profile", "profile prev": "previous profile" };
+function gestureText() {
+  const t = LIVE.touch, a = LIVE.gesture || "";
+  const n = t ? t.pts.length : 0;
+  let g = GESTURES[a] || (a.startsWith("tap ") ? `${a.split(" ")[1]}-finger tap ×${a.split(" ")[2]}` : a.startsWith("press ") ? "panel button" : "");
+  if (t && n && !t.live) g = `${n} finger${n > 1 ? "s" : ""} muted (pen near or palm)`;
+  else if (n && !g) g = `${n} finger${n > 1 ? "s" : ""} down` + (S.touch_mode === "windows" ? ", sent to Windows as touch" : "");
+  if (t && t.palms) g += (g ? " · " : "") + `${t.palms} palm contact${t.palms > 1 ? "s" : ""} ignored`;
+  return g;
 }
 
 // drag to set the active area on the Screen area page
@@ -842,6 +869,8 @@ const Panel = {
     }
     if (document.activeElement !== $("#profName")) $("#profName").value = (profs[cur] || {}).name || "";
     $("#profDel").disabled = profs.length < 2;
+    const tm = (profs[cur] || {}).touch || "shortcuts";
+    for (const b of $$("#profTouch button")) b.classList.toggle("on", b.dataset.v === tm);
   },
   async flush() {  // a pending button edit belongs to the profile it was made in
     if (!this.t) return;
@@ -865,6 +894,11 @@ const Panel = {
     const copy = o => JSON.parse(JSON.stringify(o));
     const profs = () => copy(S.cfg.panel_profiles || []);
     $("#profSel").onchange = e => this.switchProfile(+e.target.value);
+    for (const b of $$("#profTouch button")) b.onclick = () => {
+      const p = profs();
+      p[S.cfg.panel_profile].touch = b.dataset.v;
+      this.setProfiles(p);
+    };
     $("#profName").onchange = e => {
       const p = profs(), name = e.target.value.trim();
       if (!name) { e.target.value = p[S.cfg.panel_profile].name; return; }

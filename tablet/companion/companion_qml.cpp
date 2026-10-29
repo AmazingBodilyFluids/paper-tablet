@@ -57,6 +57,7 @@ Window {
     property real traceOpacity: 0.5
     property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
     property bool lightOn: false
+    property bool nativeTouch: false     // fingers go to Windows as real touch, no gestures here
     property int profileCount: 1
     readonly property real footH: 190
     readonly property int rows: 8
@@ -111,6 +112,7 @@ Window {
             gesturesOn = a[0] === "1"
             if (a.length > 1) swipeStep = parseFloat(a[1])
             if (a.length > 2) palmSize = parseFloat(a[2])
+            if (a.length > 3) nativeTouch = a[3] === "1"
         }
         else if (c === "toast") say(a.join(" "))
         else if (c === "state") {
@@ -225,7 +227,7 @@ Window {
     function pen(px, py, pressure, touching, eraser, inRange) {
         if (inRange) {
             penSeen = Date.now()
-            if (gMode !== "") endGesture()  // the pen came back: a hand on the screen is a palm
+            if (gMode !== "" && gMode !== "dead") { endGesture(); sendTouch() }  // the pen came back: a hand on the screen is a palm
         }
         var p = view.mapFromItem(win.contentItem, px, py)
         if (penBtn !== -1 || (touching && inPanel(p))) {
@@ -344,7 +346,7 @@ Window {
         interval: 1000; repeat: true; running: Object.keys(win.gPts).length > 0
         onTriggered: if (Date.now() - win.gLastEv > 3000) {
             console.warn("LOG:touch sweep " + Object.keys(win.gPts).length)
-            win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged()
+            win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged(); win.sendTouch()
         }
     }
     Timer { id: tapTimer; interval: 330; onTriggered: { if (win.tapK > 0) win.act("tap " + win.tapN + " " + win.tapK); win.tapK = 0 } }
@@ -366,6 +368,14 @@ Window {
         traceY = adj.y + c.y - adj.c.y
         if (l.length > 1 && adj.d > 20) traceScale = Math.max(0.05, Math.min(20, adj.s * spread(l) / adj.d))
     }
+    // Every contact to the PC as fractions of the view: "touch live|dead <palms> id x y ...". The PC
+    // shows them on its live view and, in Windows-touch mode, injects them ("dead" = lift them all).
+    function sendTouch() {
+        var out = ["touch", gMode === "dead" || traceAdjust ? "dead" : "live", Object.keys(palms).length]
+        for (var id in gPts)
+            out.push(id, (gPts[id].x / view.width).toFixed(4), (gPts[id].y / view.height).toFixed(4))
+        act(out.join(" "))
+    }
     function fingersChanged() {
         if (traceAdjust) { adjustChanged(); return }
         var l = gList(), n = l.length
@@ -373,12 +383,13 @@ Window {
         if (n === 0) {
             if (gMode === "pan") act("pan end")
             if (gMode === "rotate") act("rotate end")
-            if (gMax > 0) touchEnded()
+            if (gMax > 0 && !nativeTouch) touchEnded()
             gMode = ""; gMax = 0; gC0 = null; gMoved = 0; gTapOk = true; gStart = ({}); gT0 = 0; return
         }
         if (gT0 === 0) gT0 = Date.now()
         if (gMode === "dead") return
         if (gMax > 5 || Date.now() - penSeen < 700 || !gesturesOn || mode !== "ink") { endGesture(); return }
+        if (nativeTouch) { gMode = "native"; return }
         if (gMode === "rotate" && n !== 5) { endGesture(); return }
         if (n === 5) {
             if (gMode === "three" && gSteps !== 0) { endGesture(); return }
@@ -402,6 +413,7 @@ Window {
             var a = gPts[id], b = gStart[id]
             if (b) gMoved = Math.max(gMoved, Math.abs(a.x - b.x) + Math.abs(a.y - b.y))
         }
+        if (nativeTouch) return
         if (gMode === "dead" || !gC0) return
         if (l.length === 2 && (gMode === "" || gMode === "pan" || gMode === "pinch")) {
             var c = centroid(l), d = spread(l)
@@ -637,7 +649,8 @@ Window {
             Text {
                 x: 22; y: view.height - win.footH + 18; width: parent.width - 44; wrapMode: Text.Wrap
                 font.pixelSize: 19; color: "black"; lineHeight: 1.1
-                text: win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
+                text: win.gesturesOn && win.nativeTouch ? "Fingers work as a touchscreen in Windows: scroll, pinch, tap"
+                    : win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
                                      : "Power button: back to notebooks"
             }
         }
@@ -685,7 +698,7 @@ Window {
                     var st = win.gStart; st[t.pointId] = {x: t.x, y: t.y}; win.gStart = st
                     changed = true
                 }
-                if (changed) win.fingersChanged()
+                if (changed) { win.fingersChanged(); win.sendTouch() }
             }
             onUpdated: (pts) => {
                 var g = win.gPts, moved = false, palm = false
@@ -695,8 +708,8 @@ Window {
                     if (g[t.pointId] && win.palmCheck(t)) { palm = true; continue }
                     if (g[t.pointId]) { g[t.pointId] = {x: t.x, y: t.y}; moved = true }
                 }
-                if (palm) { win.fingersChanged(); return }
-                if (moved) { win.gPts = g; win.fingersMoved() }
+                if (palm) { win.fingersChanged(); win.sendTouch(); return }
+                if (moved) { win.gPts = g; win.fingersMoved(); win.sendTouch() }
             }
             onReleased: (pts) => {
                 var g = win.gPts, changed = false
@@ -719,9 +732,9 @@ Window {
                         delete g[t.pointId]; changed = true
                     }
                 }
-                if (changed) { win.gPts = g; win.fingersChanged() }
+                if (changed) { win.gPts = g; win.fingersChanged(); win.sendTouch() }
             }
-            onCanceled: (pts) => { win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged(); win.pressing = -1 }
+            onCanceled: (pts) => { win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged(); win.sendTouch(); win.pressing = -1 }
         }
 
         Repeater {  // 9 calibration crosshairs, reading order, 10% inset (matches the PDF sheet)

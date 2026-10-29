@@ -284,7 +284,10 @@ class Mapper:
 
     def _pq(self, x, y):
         """Position on the monitor as fractions, before clamping (outside 0..1 = off the mapped area)."""
-        p, q = self.oriented(*self.uv(x, y))
+        return self.fit_frac(*self.oriented(*self.uv(x, y)))
+
+    def fit_frac(self, p, q):
+        """Oriented tablet fractions (as the tablet screen shows them) -> monitor fractions."""
         ax0, ay0, ax1, ay1 = self.area
         p = (p - ax0) / (ax1 - ax0)
         q = (q - ay0) / (ay1 - ay0)
@@ -299,8 +302,14 @@ class Mapper:
         p, q = self._pq(x, y)
         return 0.0 <= p <= 1.0 and 0.0 <= q <= 1.0
 
+    def frac_to_screen(self, p, q):
+        """A finger at oriented tablet fractions -> monitor pixel (clamped), like the pen."""
+        return self._pixel(*self.fit_frac(p, q))
+
     def to_screen(self, x, y):
-        p, q = self._pq(x, y)
+        return self._pixel(*self._pq(x, y))
+
+    def _pixel(self, p, q):
         l, t, r, b = self.monitor
         mw, mh = r - l, b - t
         p = min(1.0, max(0.0, p))
@@ -544,6 +553,52 @@ class PenTranslator:
 
 # --------------------------------------------------------------------------- Windows output
 
+def _pointer_api():
+    """user32 with the synthetic-pointer calls typed, and the POINTER_TYPE_INFO structure."""
+    from ctypes import wintypes as wt
+
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    class POINTER_INFO(ctypes.Structure):
+        _fields_ = [("pointerType", wt.DWORD), ("pointerId", ctypes.c_uint32),
+                    ("frameId", ctypes.c_uint32), ("pointerFlags", ctypes.c_uint32),
+                    ("sourceDevice", wt.HANDLE), ("hwndTarget", wt.HWND),
+                    ("ptPixelLocation", POINT), ("ptHimetricLocation", POINT),
+                    ("ptPixelLocationRaw", POINT), ("ptHimetricLocationRaw", POINT),
+                    ("dwTime", wt.DWORD), ("historyCount", ctypes.c_uint32),
+                    ("InputData", ctypes.c_int32), ("dwKeyStates", wt.DWORD),
+                    ("PerformanceCount", ctypes.c_uint64), ("ButtonChangeType", ctypes.c_int)]
+
+    class POINTER_PEN_INFO(ctypes.Structure):
+        _fields_ = [("pointerInfo", POINTER_INFO), ("penFlags", ctypes.c_uint32),
+                    ("penMask", ctypes.c_uint32), ("pressure", ctypes.c_uint32),
+                    ("rotation", ctypes.c_uint32), ("tiltX", ctypes.c_int32), ("tiltY", ctypes.c_int32)]
+
+    class POINTER_TOUCH_INFO(ctypes.Structure):
+        _fields_ = [("pointerInfo", POINTER_INFO), ("touchFlags", ctypes.c_uint32),
+                    ("touchMask", ctypes.c_uint32), ("rcContact", RECT), ("rcContactRaw", RECT),
+                    ("orientation", ctypes.c_uint32), ("pressure", ctypes.c_uint32)]
+
+    class _U(ctypes.Union):  # union must be sized for the larger touch member
+        _fields_ = [("touchInfo", POINTER_TOUCH_INFO), ("penInfo", POINTER_PEN_INFO)]
+
+    class POINTER_TYPE_INFO(ctypes.Structure):
+        _anonymous_ = ("u",)
+        _fields_ = [("type", wt.DWORD), ("u", _U)]
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.CreateSyntheticPointerDevice.restype = wt.HANDLE
+    user32.CreateSyntheticPointerDevice.argtypes = [wt.DWORD, wt.ULONG, wt.DWORD]
+    user32.InjectSyntheticPointerInput.argtypes = [wt.HANDLE, ctypes.POINTER(POINTER_TYPE_INFO), ctypes.c_uint32]
+    user32.DestroySyntheticPointerDevice.argtypes = [wt.HANDLE]
+    return user32, POINTER_TYPE_INFO
+
+
 class WindowsPen:
     """Synthetic Windows Ink pen via CreateSyntheticPointerDevice / InjectSyntheticPointerInput
     (Windows 10 1809+). Apps see a real pen with pressure and tilt, no driver required."""
@@ -557,48 +612,7 @@ class WindowsPen:
     CHANGE = {"": 0, "down": 1, "up": 2}  # POINTER_CHANGE_FIRSTBUTTON_DOWN / _UP
 
     def __init__(self, feedback="indirect", pointer_id=0):
-        from ctypes import wintypes as wt
-
-        class POINT(ctypes.Structure):
-            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-        class RECT(ctypes.Structure):
-            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
-                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
-
-        class POINTER_INFO(ctypes.Structure):
-            _fields_ = [("pointerType", wt.DWORD), ("pointerId", ctypes.c_uint32),
-                        ("frameId", ctypes.c_uint32), ("pointerFlags", ctypes.c_uint32),
-                        ("sourceDevice", wt.HANDLE), ("hwndTarget", wt.HWND),
-                        ("ptPixelLocation", POINT), ("ptHimetricLocation", POINT),
-                        ("ptPixelLocationRaw", POINT), ("ptHimetricLocationRaw", POINT),
-                        ("dwTime", wt.DWORD), ("historyCount", ctypes.c_uint32),
-                        ("InputData", ctypes.c_int32), ("dwKeyStates", wt.DWORD),
-                        ("PerformanceCount", ctypes.c_uint64), ("ButtonChangeType", ctypes.c_int)]
-
-        class POINTER_PEN_INFO(ctypes.Structure):
-            _fields_ = [("pointerInfo", POINTER_INFO), ("penFlags", ctypes.c_uint32),
-                        ("penMask", ctypes.c_uint32), ("pressure", ctypes.c_uint32),
-                        ("rotation", ctypes.c_uint32), ("tiltX", ctypes.c_int32), ("tiltY", ctypes.c_int32)]
-
-        class POINTER_TOUCH_INFO(ctypes.Structure):
-            _fields_ = [("pointerInfo", POINTER_INFO), ("touchFlags", ctypes.c_uint32),
-                        ("touchMask", ctypes.c_uint32), ("rcContact", RECT), ("rcContactRaw", RECT),
-                        ("orientation", ctypes.c_uint32), ("pressure", ctypes.c_uint32)]
-
-        class _U(ctypes.Union):  # union must be sized for the larger touch member
-            _fields_ = [("touchInfo", POINTER_TOUCH_INFO), ("penInfo", POINTER_PEN_INFO)]
-
-        class POINTER_TYPE_INFO(ctypes.Structure):
-            _anonymous_ = ("u",)
-            _fields_ = [("type", wt.DWORD), ("u", _U)]
-
-        self.POINTER_TYPE_INFO = POINTER_TYPE_INFO
-        self.user32 = ctypes.WinDLL("user32", use_last_error=True)
-        self.user32.CreateSyntheticPointerDevice.restype = wt.HANDLE
-        self.user32.CreateSyntheticPointerDevice.argtypes = [wt.DWORD, wt.ULONG, wt.DWORD]
-        self.user32.InjectSyntheticPointerInput.argtypes = [wt.HANDLE, ctypes.POINTER(POINTER_TYPE_INFO), ctypes.c_uint32]
-        self.user32.DestroySyntheticPointerDevice.argtypes = [wt.HANDLE]
+        self.user32, self.POINTER_TYPE_INFO = _pointer_api()
         self.dev = self.user32.CreateSyntheticPointerDevice(self.PT_PEN, 1, self.FEEDBACK[feedback])
         if not self.dev:
             raise OSError(f"CreateSyntheticPointerDevice failed: {ctypes.get_last_error()}")
@@ -643,6 +657,88 @@ class WindowsPen:
         if self.dev:
             self.user32.DestroySyntheticPointerDevice(self.dev)
             self.dev = None
+
+
+class WindowsTouch:
+    """Synthetic touchscreen (CreateSyntheticPointerDevice, PT_TOUCH): apps get real touch, so
+    Windows does its own panning with inertia, pinch zoom and so on. update() takes every contact
+    that is down, as {id: (x, y)} in screen pixels; contacts missing from it are lifted."""
+
+    PT_TOUCH = 2
+    MAX = 10
+
+    def __init__(self):
+        self.user32, self.POINTER_TYPE_INFO = _pointer_api()
+        self.dev = self.user32.CreateSyntheticPointerDevice(self.PT_TOUCH, self.MAX, 1)
+        if not self.dev:
+            raise OSError(f"CreateSyntheticPointerDevice(touch) failed: {ctypes.get_last_error()}")
+        self.slots = {}  # contact id -> (pointer id, x, y)
+        self.frame = 0
+        self.lock = threading.Lock()
+        self.last = 0.0
+        threading.Thread(target=self._keepalive, daemon=True).start()
+
+    def _inject(self, items):
+        arr = (self.POINTER_TYPE_INFO * len(items))()
+        self.frame += 1
+        for k, (pid, x, y, flags) in enumerate(items):
+            info = arr[k]
+            info.type = self.PT_TOUCH
+            t = info.touchInfo
+            pi = t.pointerInfo
+            pi.pointerType = self.PT_TOUCH
+            pi.pointerId = pid
+            pi.frameId = self.frame
+            pi.pointerFlags = flags | (WindowsPen.FLAG["PRIMARY"] if k == 0 and flags & 0x4 else 0)
+            pi.ptPixelLocation.x = pi.ptPixelLocationRaw.x = x
+            pi.ptPixelLocation.y = pi.ptPixelLocationRaw.y = y
+            t.touchMask = 0x1  # TOUCH_MASK_CONTACTAREA
+            t.rcContact.left, t.rcContact.right = x - 4, x + 4
+            t.rcContact.top, t.rcContact.bottom = y - 4, y + 4
+        if not self.user32.InjectSyntheticPointerInput(self.dev, arr, len(items)):
+            print(f"touch inject failed: error {ctypes.get_last_error()}", file=sys.stderr)
+        self.last = time.monotonic()
+
+    def update(self, contacts):
+        F = WindowsPen.FLAG
+        held = F["INRANGE"] | F["INCONTACT"]
+        with self.lock:
+            items, new_slots = [], {}
+            used = {v[0] for k, v in self.slots.items() if k in contacts}
+            for cid, (x, y) in list(contacts.items())[:self.MAX]:
+                if cid in self.slots:
+                    pid = self.slots[cid][0]
+                    items.append((pid, x, y, F["UPDATE"] | held))
+                else:
+                    pid = next(i for i in range(self.MAX) if i not in used)
+                    used.add(pid)
+                    items.append((pid, x, y, F["DOWN"] | held))
+                new_slots[cid] = (pid, x, y)
+            for cid, (pid, x, y) in self.slots.items():
+                if cid not in new_slots:
+                    items.append((pid, x, y, F["UP"]))
+            self.slots = new_slots
+            if items:
+                self._inject(items)
+
+    def _keepalive(self):
+        # a contact that stops moving still has to be reported, or Windows cancels it
+        F = WindowsPen.FLAG
+        while self.dev:
+            time.sleep(0.05)
+            with self.lock:
+                if self.slots and time.monotonic() - self.last > 0.08:
+                    self._inject([(pid, x, y, F["UPDATE"] | F["INRANGE"] | F["INCONTACT"])
+                                  for pid, x, y in self.slots.values()])
+
+    def lift_all(self):
+        self.update({})
+
+    def close(self):
+        if self.dev:
+            self.lift_all()
+            dev, self.dev = self.dev, None
+            self.user32.DestroySyntheticPointerDevice(dev)
 
 
 class PrintPen:
