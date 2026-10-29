@@ -366,6 +366,7 @@ function drawTablet(cv) {
   ctx.fillRect(f.x + cl(u[0]) * f.w, f.y + cl(u[1]) * f.h, (cl(u[2]) - cl(u[0])) * f.w, (cl(u[3]) - cl(u[1])) * f.h);
   ctx.strokeStyle = C.usedEdge; ctx.lineWidth = 1.5;
   ctx.strokeRect(f.x + cl(u[0]) * f.w, f.y + cl(u[1]) * f.h, (cl(u[2]) - cl(u[0])) * f.w, (cl(u[3]) - cl(u[1])) * f.h);
+  if (cv.id === "mapPreview") drawMask(ctx, f);
   const a = cv._drag || S.cfg.area;
   ctx.setLineDash([7, 4]); ctx.strokeStyle = C.area; ctx.lineWidth = 2;
   ctx.strokeRect(f.x + a[0] * f.w, f.y + a[1] * f.h, (a[2] - a[0]) * f.w, (a[3] - a[1]) * f.h);
@@ -439,23 +440,118 @@ function gestureText() {
   return g;
 }
 
-// drag to set the active area on the Screen area page
+// ------------------------------------------------------------------ pen mask on the Screen area picture
+
+// Where the mask comes from: the image it was made from (kept while this window is open, so moving
+// and zooming it again stays sharp) or else the mask grid itself. s = zoom, ox / oy = offset as a
+// fraction of the screen. The grid is rendered from it; the tablet gets it when a drag or zoom ends.
+const MASK_N = 72;
+let maskSrc = null;
+function maskSource() {
+  const hex = (S.cfg.mask || "").padEnd(MASK_N * MASK_N, "0");
+  if (!maskSrc || maskSrc.hex !== hex) {
+    const c = document.createElement("canvas"); c.width = c.height = MASK_N;
+    const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N);
+    for (let i = 0; i < MASK_N * MASK_N; i++) {
+      const v = 255 - Math.round(parseInt(hex[i], 16) * 255 / 15);
+      d.data.set([v, v, v, 255], 4 * i);
+    }
+    g.putImageData(d, 0, 0);
+    maskSrc = { el: c, grid: true, s: 1, ox: 0, oy: 0, hex };
+  }
+  return maskSrc;
+}
+// The source drawn into a MASK_N x MASK_N grid over the screen (white outside it): levels 0..15.
+function maskRender(src) {
+  const N = MASK_N, [vw, vh] = S.view || [1, 1], c = document.createElement("canvas");
+  c.width = c.height = N;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, N, N);
+  g.imageSmoothingEnabled = !src.grid;
+  let dw = N, dh = N;
+  if (!src.grid) {
+    const k = Math.max(vw / src.el.width, vh / src.el.height);
+    dw = src.el.width * k * N / vw; dh = src.el.height * k * N / vh;
+  }
+  dw *= src.s; dh *= src.s;
+  g.drawImage(src.el, (N - dw) / 2 + src.ox * N, (N - dh) / 2 + src.oy * N, dw, dh);
+  const px = g.getImageData(0, 0, N, N).data, out = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++)
+    out[i] = Math.round((1 - (0.2126 * px[4 * i] + 0.7152 * px[4 * i + 1] + 0.0722 * px[4 * i + 2]) / 255) * 15);
+  return out;
+}
+function drawMask(ctx, f) {
+  const src = maskSource(), lv = src.s === 1 && !src.ox && !src.oy && src.grid
+    ? Uint8Array.from(src.hex, ch => parseInt(ch, 16)) : maskRender(src);
+  if (!lv.some(v => v)) return;
+  const c = document.createElement("canvas"); c.width = c.height = MASK_N;
+  const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N), a = S.cfg.mask_on ? 0.7 : 0.3;
+  for (let i = 0; i < lv.length; i++) d.data.set([0, 0, 0, Math.round(255 * a * lv[i] / 15)], 4 * i);
+  g.putImageData(d, 0, 0);
+  ctx.save(); ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(c, f.x, f.y, f.w, f.h);
+  ctx.restore();
+}
+async function maskCommit(src = maskSource()) {
+  const lv = maskRender(src), hex = Array.from(lv, v => v.toString(16)).join("");
+  src.hex = hex;  // the source (and its zoom / offset) stays: this grid came from it
+  await setKey("mask", hex);
+  if (!S.cfg.mask_on) await setKey("mask_on", true);
+  refresh();
+}
+let dragWhat = "area";
+function dragHint() {
+  $("#dragHint").textContent = dragWhat === "mask" ? "Mouse wheel zooms the mask " : "";
+}
+for (const b of $$("#dragWhat button")) b.onclick = () => {
+  dragWhat = b.dataset.v;
+  for (const x of $$("#dragWhat button")) x.classList.toggle("on", x === b);
+  dragHint();
+};
+
+// drag on the Screen area picture: the active area, or the pen mask
 (() => {
   const cv = $("#mapPreview");
-  let start = null;
-  const frac = e => {
+  let start = null, m0 = null, wheelT = 0;
+  const frac = (e, clamp = true) => {
     const r = cv.getBoundingClientRect(), f = frameRect(r.width, r.height);
-    return [Math.min(1, Math.max(0, (e.clientX - r.left - f.x) / f.w)), Math.min(1, Math.max(0, (e.clientY - r.top - f.y) / f.h))];
+    const p = (e.clientX - r.left - f.x) / f.w, q = (e.clientY - r.top - f.y) / f.h;
+    return clamp ? [Math.min(1, Math.max(0, p)), Math.min(1, Math.max(0, q))] : [p, q];
   };
   const box = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
-  cv.addEventListener("mousedown", e => { start = frac(e); });
-  window.addEventListener("mousemove", e => { if (start) { cv._drag = box(start, frac(e)); drawTablet(cv); } });
+  cv.addEventListener("mousedown", e => {
+    if (dragWhat === "mask") { const s = maskSource(); start = frac(e, false); m0 = [s.ox, s.oy]; }
+    else start = frac(e);
+  });
+  window.addEventListener("mousemove", e => {
+    if (!start) return;
+    if (dragWhat === "mask") {
+      const p = frac(e, false), s = maskSource();
+      s.ox = m0[0] + p[0] - start[0]; s.oy = m0[1] + p[1] - start[1];
+    } else cv._drag = box(start, frac(e));
+    drawTablet(cv);
+  });
   window.addEventListener("mouseup", e => {
     if (!start) return;
+    if (dragWhat === "mask") {
+      const p = frac(e, false), moved = Math.abs(p[0] - start[0]) + Math.abs(p[1] - start[1]) > 0.002;
+      start = null;
+      if (moved) maskCommit();
+      return;
+    }
     const a = box(start, frac(e));
     start = null; cv._drag = null;
     if (a[2] - a[0] >= 0.05 && a[3] - a[1] >= 0.05) setArea(a); else drawTablet(cv);
   });
+  cv.addEventListener("wheel", e => {
+    if (dragWhat !== "mask") return;
+    e.preventDefault();
+    const s = maskSource();
+    s.s = Math.min(20, Math.max(0.05, s.s * Math.pow(1.1, -e.deltaY / 100)));
+    drawTablet(cv);
+    clearTimeout(wheelT);
+    wheelT = setTimeout(maskCommit, 400);
+  }, { passive: false });
 })();
 window.addEventListener("resize", () => drawStatic());
 
@@ -1147,22 +1243,12 @@ function maskFromImage(input) {
   const img = new Image(), url = URL.createObjectURL(file);
   img.onload = async () => {
     URL.revokeObjectURL(url);
-    const N = 72, [vw, vh] = S.view || [1, 1], k = Math.max(vw / img.width, vh / img.height);
-    const c = document.createElement("canvas"); c.width = c.height = N;
-    const g = c.getContext("2d");
-    g.fillStyle = "#fff"; g.fillRect(0, 0, N, N);
-    const dw = img.width * k * N / vw, dh = img.height * k * N / vh;
-    g.drawImage(img, (N - dw) / 2, (N - dh) / 2, dw, dh);
-    const px = g.getImageData(0, 0, N, N).data;
-    let hex = "";
-    for (let i = 0; i < N * N; i++) {
-      const lum = (0.2126 * px[4 * i] + 0.7152 * px[4 * i + 1] + 0.0722 * px[4 * i + 2]) / 255;
-      hex += Math.round((1 - lum) * 15).toString(16);
-    }
-    await setKey("mask", hex);
-    if (!S.cfg.mask_on) await setKey("mask_on", true);
-    toast("Mask made from " + file.name + ".");
-    refresh();
+    maskSrc = { el: img, grid: false, s: 1, ox: 0, oy: 0, hex: null };
+    await maskCommit(maskSrc);
+    toast("Mask made from " + file.name + ". On the Screen area picture, drag it into place and zoom it with the wheel.");
+    dragWhat = "mask";
+    for (const x of $$("#dragWhat button")) x.classList.toggle("on", x.dataset.v === "mask");
+    dragHint();
   };
   img.onerror = () => { URL.revokeObjectURL(url); toast("That file isn't an image the app can read."); };
   img.src = url;
