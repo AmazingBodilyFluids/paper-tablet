@@ -55,7 +55,7 @@ def png_la(levels, n=N):
 
 
 class Mask:
-    def __init__(self, path=None, contrast=1.0):
+    def __init__(self, path=None, contrast=1.0, invert=False):
         self.path = path
         self.lock = threading.Lock()
         self.raw = bytearray(N * N)
@@ -68,12 +68,14 @@ class Mask:
                     self.raw = bytearray(data)
             except (OSError, zlib.error):
                 pass
-        self.set_contrast(contrast)
+        self.set_contrast(contrast, invert)
 
     # ---- what the pen and the tablet use
-    def set_contrast(self, k):
+    def set_contrast(self, k, invert=False):
+        """The contrast, and whether black and white swap (before the contrast), over the stored mask."""
         with self.lock:
-            self.table = contrast_table(k)
+            t = contrast_table(k)
+            self.table = bytes(t[255 - v] for v in range(256)) if invert else t
             self.eff = bytes(self.raw).translate(self.table)
             self.cov = sum(self.eff) / (255 * N * N)
             self.ver = next(_versions)
@@ -132,40 +134,4 @@ class Mask:
                 self.raw = bytearray(255 - v for v in self.raw)
             else:
                 raise ValueError(name)
-            self._changed()
-
-    def shift(self, dp, dq):
-        """Move the whole mask by a fraction of the screen (what drags off the edge is lost)."""
-        dx, dy = round(dp * N), round(dq * N)
-        if not dx and not dy:
-            return
-        with self.lock:
-            out = bytearray(N * N)
-            for r in range(N):
-                sr = r - dy
-                if not 0 <= sr < N:
-                    continue
-                src = self.raw[sr * N:(sr + 1) * N]
-                if dx >= 0:
-                    out[r * N + dx:(r + 1) * N] = src[:N - dx]
-                else:
-                    out[r * N:(r + 1) * N + dx] = src[-dx:]
-            self.raw = out
-            self._changed()
-
-    def paint(self, value, rx, ry, pts):
-        """Round brush dabs at (p, q) fractions of the screen; rx / ry = radius as a fraction of the
-        screen width / height."""
-        rx, ry = max(1.0, rx * N), max(1.0, ry * N)
-        with self.lock:
-            for p, q in pts:
-                cx, cy = p * N, q * N
-                for r in range(max(0, int(cy - ry)), min(N, int(cy + ry) + 1)):
-                    t = (r + 0.5 - cy) / ry
-                    if abs(t) > 1:
-                        continue
-                    half = rx * math.sqrt(1 - t * t)
-                    c0, c1 = max(0, int(cx - half + 0.5)), min(N, int(cx + half + 0.5))
-                    if c1 > c0:
-                        self.raw[r * N + c0:r * N + c1] = bytes([value]) * (c1 - c0)
             self._changed()

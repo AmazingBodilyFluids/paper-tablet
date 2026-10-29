@@ -58,39 +58,39 @@ Window {
     property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
     property bool lightOn: false
     property bool nativeTouch: false     // fingers go to Windows as real touch, no gestures here
-    // pen mask: the PC keeps it and sends it as an image (black, alpha = how masked). In edit mode
-    // the pen paints it (eraser end clears) and one finger drags it; both go to the PC, which sends
-    // the new image back. Until then the dabs and the drag show here.
+    // pen mask: the PC keeps it and sends it as an image (black, alpha = how masked); it is made
+    // and placed in the desktop app, and only switched and inverted here
     property string maskSrc: ""
     // the mask strip: the PC's masks down the side away from the panel; a tap picks one
-    property bool stripOn: false
+    property bool stripAvail: false      // there are masks: the corner tab shows, the strip opens from it
+    property bool stripOpen: false
     property string stripSide: "right"
     property real stripFrac: 0
     property var maskList: []            // [{id, name, thumb}]
     property string maskActive: ""
     property bool stripPen: false        // the pen went down in the strip: nothing else until it lifts
-    readonly property real stripW: mode === "ink" && stripOn ? stripFrac * view.width : 0
+    readonly property real stripW: mode === "ink" && stripAvail && stripOpen ? stripFrac * view.width : 0
     readonly property real stripX: stripSide === "right" ? view.width - stripW : 0
     readonly property real stripThumbH: (stripW - 24) * view.height / view.width
     readonly property real stripTileH: stripThumbH + 46
-    function inStrip(p) { return stripW > 0 && p.x >= stripX && p.x < stripX + stripW }
-    function stripPick(p) {  // None at the top, then a thumbnail and name per mask
+    readonly property int stripTop: 256   // the thumbnails start under Invert and None
+    function stripTabHit(p) {
+        return mode === "ink" && stripAvail && p.y < tabS && (stripSide === "right" ? p.x >= view.width - tabS : p.x < tabS)
+    }
+    function inStrip(p) { return stripTabHit(p) || (stripW > 0 && p.x >= stripX && p.x < stripX + stripW) }
+    function stripPick(p) {  // the corner tab, Invert, None, then a thumbnail and name per mask
+        if (stripTabHit(p)) { stripOpen = !stripOpen; act("maskstrip " + (stripOpen ? 1 : 0)); return }
+        if (p.y >= 96 && p.y < 166) { act("maskinvert"); return }  // the strip stays open to show it
         var id = null
-        if (p.y >= 70 && p.y < 140) id = "none"
-        else if (p.y >= 150) {
-            var i = Math.floor((p.y - 150) / (stripTileH + 10))
-            if (i < maskList.length && (p.y - 150) - i * (stripTileH + 10) < stripTileH) id = maskList[i].id
+        if (p.y >= 176 && p.y < 246) id = "none"
+        else if (p.y >= stripTop) {
+            var i = Math.floor((p.y - stripTop) / (stripTileH + 10))
+            if (i < maskList.length && (p.y - stripTop) - i * (stripTileH + 10) < stripTileH) id = maskList[i].id
         }
-        if (id !== null) act("maskpick " + id)
+        if (id !== null) { stripOpen = false; act("maskpick " + id) }  // picked: the strip folds away
     }
     property bool maskOn: false
-    property bool maskEdit: false
-    property real maskBrush: 45          // brush radius, view pixels
-    property int maskPaintV: -1          // 255 paint / 0 erase for the dabs not yet sent
-    property var maskPts: []             // their centres, as fractions of the view
-    property var maskLast: null
-    property real maskDX: 0              // live finger drag while editing, in view pixels
-    property real maskDY: 0
+    property bool maskInvert: false
     property int profileCount: 1
     // E-paper update mode of the ink area (main.cpp hands over its EPScreenModeItem and the mode
     // numbers). Pen mode only flushes on pen activity, so other changes to what is under the ink
@@ -119,12 +119,12 @@ Window {
     property bool imgMoved: false
     onAdjChanged: { if (!adj && imgMoved) { imgMoved = false; fullRefresh() } else epMode() }
     onMaskOnChanged: refreshScreen()
-    onMaskEditChanged: refreshScreen()
+    onMaskInvertChanged: refreshScreen()
+    onMaskActiveChanged: refreshScreen()
+    onStripAvailChanged: refreshScreen()
     onMaskSrcChanged: refreshScreen()
     onMaskListChanged: refreshScreen()
     onStripWChanged: refreshScreen()
-    onMaskDXChanged: refreshScreen()
-    onMaskDYChanged: refreshScreen()
     onAreaChanged: refreshScreen()
     onModeChanged: refreshScreen()
     onPenDownChanged: epMode()
@@ -176,11 +176,13 @@ Window {
             traceSrc = src ? "file://" + src : ""
         }
         else if (c === "traceadjust") traceAdjust = a[0] === "1"
-        else if (c === "mask") {  // mask <on> <edit> <hex>
-            maskOn = a[0] === "1"; maskEdit = a[1] === "1"
+        else if (c === "mask") {  // mask <on> <inverted>
+            maskOn = a[0] === "1"; maskInvert = a[1] === "1"
         }
         else if (c === "maskimg") { maskSrc = ""; if (a.length && a[0]) maskSrc = "file://" + a.join(" ") }
-        else if (c === "maskstrip") { stripOn = a[0] === "1"; stripSide = a[1] || "right"; stripFrac = parseFloat(a[2]) || 0 }
+        else if (c === "maskstrip") {  // maskstrip <there> <side> <width frac> <open>
+            stripAvail = a[0] === "1"; stripSide = a[1] || "right"; stripFrac = parseFloat(a[2]) || 0; stripOpen = a[3] === "1"
+        }
         else if (c === "masks") { var m = JSON.parse(a.join(" ")); maskActive = m.active; maskList = m.list }
         else if (c === "profile") { profileCount = parseInt(a[1]); profileName = a.slice(2).join(" ") }
         else if (c === "gestures") {
@@ -229,49 +231,11 @@ Window {
         else if (fadeMs > 0) st.fade(fadeMs)
     }
 
-    // ---- trace mask
-    function maskPaint(p, value) {
-        if (value !== maskPaintV) { maskFlush(); maskPaintV = value }
-        if (maskLast && Math.abs(p.x - maskLast.x) + Math.abs(p.y - maskLast.y) < maskBrush / 3) return
-        maskLast = p
-        maskPts.push((p.x / view.width).toFixed(4), (p.y / view.height).toFixed(4))
-        dab.createObject(maskDabs, {x: p.x - maskBrush, y: p.y - maskBrush, r: maskBrush, erase: value === 0})
-    }
-    function maskFlush() {
-        if (maskPts.length)
-            act("maskpaint " + maskPaintV + " " + (maskBrush / view.width).toFixed(4) + " "
-                + (maskBrush / view.height).toFixed(4) + " " + maskPts.join(" "))
-        maskPts = []; maskLast = null
-    }
-    function maskShown() {  // the PC's new image is up: the local dabs and drag are in it now
-        for (var i = maskDabs.children.length - 1; i >= 0; i--) maskDabs.children[i].destroy()
-        maskDX = 0; maskDY = 0
-    }
-    property var maskDrag: null
-    property bool maskDirty: false
-    function maskFingers() {
-        var l = gList()
-        if (l.length === 1 && !maskDrag) maskDrag = {x: l[0].x, y: l[0].y}
-        if (l.length === 0 && maskDrag) {
-            if (Math.abs(maskDX) + Math.abs(maskDY) < 20 && hintHit(maskHint, maskDrag)) {
-                maskDX = 0; maskDY = 0; maskDrag = null; act("maskedit"); return  // "tap here when done"
-            }
-            maskDrag = null
-            if (Math.abs(maskDX) + Math.abs(maskDY) < 3) { maskDX = 0; maskDY = 0; return }
-            act("maskmove " + (maskDX / view.width).toFixed(4) + " " + (maskDY / view.height).toFixed(4))
-        }
-    }
     function hintHit(item, p) {
         if (!item.visible) return false
         var q = item.mapFromItem(view, p.x, p.y)
         return q.x >= -20 && q.y >= -20 && q.x < item.width + 20 && q.y < item.height + 20
     }
-    function maskFingerMoved() {
-        var l = gList()
-        if (!maskDrag || l.length !== 1) return
-        maskDX = l[0].x - maskDrag.x; maskDY = l[0].y - maskDrag.y
-    }
-
     // ---- panel: the fold tab and the buttons, by finger or pen
     function tabHit(p) {
         return panelOn && p.y < tabS && (panelSide === "right" ? p.x >= view.width - tabS : p.x < tabS)
@@ -322,7 +286,7 @@ Window {
         else if (b.kind === "local") { clearInk() }
         else if (b.kind === "trace") { act("traceadjust") }
         else if (b.kind === "light") { act("light") }
-        else if (b.kind === "mask") { act("maskedit") }
+        else if (b.kind === "mask") { act("maskinvert") }
         else if (b.kind === "hold") {
             if (latched[i]) { act("release " + i); setLatch(i, false); keepLatch = false; say(b.t + " released") }
             else { act("press " + i); setLatch(i, true); keepLatch = true; holdStart = Date.now() }
@@ -360,12 +324,6 @@ Window {
             endStroke()
             if (touching && penBtn === -1) { penBtn = pressAt(p); if (penBtn === -1) penBtn = 99 }
             else if (!touching || !inPanel(p)) { if (penBtn >= 0 && penBtn !== 99) releaseBtn(penBtn, true); else pressing = -1; penBtn = -1 }
-            return
-        }
-        if (maskEdit && mode === "ink") {  // painting the mask: the pen stays on the tablet
-            endStroke()
-            if (touching) { maskPaint(p, eraser ? 0 : 255); maskDirty = true }
-            else if (maskDirty) { maskDirty = false; maskFlush() }
             return
         }
         penDown = touching
@@ -529,7 +487,7 @@ Window {
     // Every contact to the PC as fractions of the view: "touch live|dead <palms> id x y ...". The PC
     // shows them on its live view and, in Windows-touch mode, injects them ("dead" = lift them all).
     function sendTouch() {
-        var out = ["touch", gMode === "dead" || traceAdjust || maskEdit ? "dead" : "live", Object.keys(palms).length]
+        var out = ["touch", gMode === "dead" || traceAdjust ? "dead" : "live", Object.keys(palms).length]
         for (var id in gPts)
             out.push(id, (gPts[id].x / view.width).toFixed(4), (gPts[id].y / view.height).toFixed(4))
         var line = out.join(" ")
@@ -539,7 +497,6 @@ Window {
     }
     property string lastTouch: ""
     function fingersChanged() {
-        if (maskEdit) { maskFingers(); return }
         if (traceAdjust) { adjustChanged(); return }
         var l = gList(), n = l.length
         gMax = Math.max(gMax, n)
@@ -570,7 +527,6 @@ Window {
         }
     }
     function fingersMoved() {
-        if (maskEdit) { maskFingerMoved(); return }
         if (traceAdjust) { adjustMoved(); return }
         var l = gList()
         for (var id in gPts) {
@@ -637,15 +593,6 @@ Window {
         }
     }
 
-    Component {  // a mask brush dab, shown until the PC's image has it
-        id: dab
-        Rectangle {
-            property real r: 10
-            property bool erase: false
-            width: 2 * r; height: 2 * r; radius: r
-            color: erase ? "white" : "#666666"; antialiasing: false
-        }
-    }
     Component {
         id: seg
         Item {  // zero-size pivot at the segment start; rotation turns it toward the end point
@@ -686,29 +633,12 @@ Window {
                 active: win.paper !== "plain"
                 sourceComponent: win.paper === "dots" || win.paper === "cross" ? marks : lines
             }
-            Item {  // pen mask: shaded where the pen is held back (darker while editing)
-                visible: win.maskOn || win.maskEdit
-                x: -paperArea.x + win.maskDX; y: win.maskDY; width: view.width; height: view.height
-                Image {
-                    anchors.fill: parent
-                    source: win.maskSrc
-                    cache: false; smooth: true
-                    opacity: win.maskEdit ? 0.6 : 0.4
-                    onStatusChanged: if (status === Image.Ready) win.maskShown()
-                }
-                Item { id: maskDabs; anchors.fill: parent }
-            }
-            Rectangle {  // mask editing: say what the pen and fingers do now
-                visible: win.maskEdit; anchors.fill: parent; anchors.margins: 6
-                color: "transparent"; border.width: 6; border.color: "black"
-                Rectangle {
-                    id: maskHint
-                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: mhint.width + 40; height: mhint.height + 24
-                    color: "black"; radius: 12
-                    Text { id: mhint; anchors.centerIn: parent; color: "white"; font.pixelSize: 26; font.bold: true
-                           horizontalAlignment: Text.AlignHCenter
-                           text: "Editing the mask: pen paints, eraser clears, 1 finger moves it\nTap here when done" }
-                }
+            Image {  // pen mask: shaded where the pen is held back
+                visible: win.maskOn
+                x: -paperArea.x; width: view.width; height: view.height
+                source: win.maskSrc
+                cache: false; smooth: true
+                opacity: 0.4
             }
             Rectangle {  // while adjusting: a frame says fingers move the image
                 visible: win.traceAdjust; anchors.fill: parent; anchors.margins: 6
@@ -790,10 +720,17 @@ Window {
             x: win.stripX; width: win.stripW; height: view.height
             Rectangle { anchors.fill: parent; color: "white" }
             Rectangle { x: win.stripSide === "right" ? 0 : parent.width - 3; width: 3; height: parent.height; color: "black" }
-            Text { x: 0; y: 22; width: parent.width; horizontalAlignment: Text.AlignHCenter; text: "MASKS"
-                   font.pixelSize: 22; font.bold: true; font.letterSpacing: 4; color: "black" }
+            Text { x: win.stripSide === "right" ? 0 : win.tabS; y: 28; width: parent.width - win.tabS
+                   horizontalAlignment: Text.AlignHCenter; text: "MASKS"
+                   font.pixelSize: 20; font.bold: true; font.letterSpacing: 3; color: "black" }
+            Rectangle {  // Invert: a toggle for the mask in use
+                x: 12; y: 96; width: parent.width - 24; height: 70; radius: 12
+                color: win.maskInvert ? "black" : "white"; border.width: 3; border.color: "black"
+                Text { anchors.centerIn: parent; text: "Invert"; font.pixelSize: 24; font.bold: true
+                       color: win.maskInvert ? "white" : "black" }
+            }
             Rectangle {  // None
-                x: 12; y: 70; width: parent.width - 24; height: 70; radius: 12
+                x: 12; y: 176; width: parent.width - 24; height: 70; radius: 12
                 color: win.maskActive === "" ? "black" : "white"; border.width: 3; border.color: "black"
                 Text { anchors.centerIn: parent; text: "None"; font.pixelSize: 24; font.bold: true
                        color: win.maskActive === "" ? "white" : "black" }
@@ -802,7 +739,7 @@ Window {
                 model: win.maskList
                 Item {
                     property bool on: modelData.id === win.maskActive
-                    x: 12; y: 150 + index * (win.stripTileH + 10); width: parent.width - 24; height: win.stripTileH
+                    x: 12; y: win.stripTop + index * (win.stripTileH + 10); width: parent.width - 24; height: win.stripTileH
                     visible: y + height <= view.height
                     Rectangle { width: parent.width; height: win.stripThumbH; color: "white"
                                 border.width: parent.on ? 7 : 2; border.color: "black" }
@@ -865,7 +802,7 @@ Window {
                     property bool on: win.pressing === index || (b.kind === "hold" && !!win.latched[index])
                                       || (b.kind === "pen" && win.penOut) || (b.kind === "snap" && win.snapOn)
                                       || (b.kind === "trace" && win.traceAdjust) || (b.kind === "light" && win.lightOn)
-                                      || (b.kind === "mask" && win.maskEdit)
+                                      || (b.kind === "mask" && win.maskInvert)
                     x: (index % 2) * win.cellW
                     y: win.headH + Math.floor(index / 2) * win.cellH
                     width: win.cellW; height: win.cellH
@@ -883,7 +820,7 @@ Window {
                                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 12
                                    text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off")
                                        : cell.b.kind === "light" ? (win.lightOn ? "on" : "off")
-                                       : cell.b.kind === "mask" ? (win.maskEdit ? "editing" : win.maskOn ? "on" : "off") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
+                                       : cell.b.kind === "mask" ? (win.maskInvert ? "inverted" : "normal") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
                                    color: cell.on ? "white" : "black" }
                         }
                     }
@@ -895,6 +832,19 @@ Window {
                 text: win.gesturesOn && win.nativeTouch ? "Fingers work as a touchscreen in Windows: scroll, pinch, tap"
                     : win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
                                      : "Power button: back to notebooks"
+            }
+        }
+
+        // The mask strip's corner tab: a half-shaded square, on the side away from the panel.
+        Rectangle {
+            visible: win.mode === "ink" && win.stripAvail
+            x: win.stripSide === "right" ? view.width - win.tabS : 0; y: 0
+            width: win.tabS; height: win.tabS
+            color: win.stripOpen ? "black" : "white"; border.width: 3; border.color: "black"
+            Rectangle {
+                anchors.centerIn: parent; width: 38; height: 38; color: "transparent"
+                border.width: 3; border.color: win.stripOpen ? "white" : "black"
+                Rectangle { x: 3; y: 3; width: 16; height: 32; color: win.stripOpen ? "white" : "black" }
             }
         }
 

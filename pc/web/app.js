@@ -127,9 +127,10 @@ function render() {
   $("#traceName").textContent = tf ? tf.split(/[\\/]/).pop() : "None. Show a photo or sketch under your strokes to trace over.";
   $("#traceName").title = tf;
   $("#maskConV").textContent = "×" + (S.cfg.mask_contrast || 1);
+  $("#maskInv").classList.toggle("on", !!S.cfg.mask_invert);
   $("#traceDel").disabled = !tf;
   renderMasks();
-  $("#maskInfo").textContent = S.mask_pct ? `${S.mask_pct}% of the screen is masked.` : "Nothing masked yet.";
+  $("#maskInfo").textContent = !S.cfg.mask_active ? "" : S.mask_pct ? `${S.mask_pct}% of the screen is masked.` : "Nothing masked.";
   $("#maskModeHint").textContent = S.cfg.mask_mode === "gate"
     ? "The darker the grey, the harder you press before ink starts. Black: no pen."
     : "Pressure is scaled by the shade: mid grey gives half, so half the opacity or size in a pressure brush. Black: no pen.";
@@ -497,13 +498,14 @@ let maskOverlay = null;  // {key, canvas}: the shaded picture, redrawn only when
 function drawMask(ctx, f) {
   const src = maskSource();
   if (!src) return;
-  const k = S.cfg.mask_contrast || 1, key = [src.ver, src.s, src.ox, src.oy, k, S.cfg.mask_on, src.el.width].join();
+  const k = S.cfg.mask_contrast || 1, inv = !!S.cfg.mask_invert;
+  const key = [src.ver, src.s, src.ox, src.oy, k, inv, S.cfg.mask_on, src.el.width].join();
   if (!maskOverlay || maskOverlay.key !== key) {
     const lv = src.grid && src.s === 1 && !src.ox && !src.oy ? src.lv : maskRender(src);
     const c = document.createElement("canvas"); c.width = c.height = MASK_N;
     const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N), a = S.cfg.mask_on ? 0.7 : 0.3;
     for (let i = 0; i < lv.length; i++)
-      d.data[4 * i + 3] = Math.round(a * Math.max(0, Math.min(255, Math.floor(128 + (lv[i] - 127.5) * k))));
+      d.data[4 * i + 3] = Math.round(a * Math.max(0, Math.min(255, Math.floor(128 + ((inv ? 255 - lv[i] : lv[i]) - 127.5) * k))));
     g.putImageData(d, 0, 0);
     maskOverlay = { key, canvas: c };
   }
@@ -903,7 +905,7 @@ const Panel = {
     ["Fit", "shortcut", "ctrl+0"], ["Move", "shortcut", "v"], ["Lasso", "shortcut", "l"], ["Fill", "shortcut", "g"],
     ["Swap col", "shortcut", "x"], ["Deselect", "shortcut", "ctrl+d"], ["Transform", "shortcut", "ctrl+t"],
     ["New layer", "shortcut", "ctrl+shift+n"], ["Copy", "shortcut", "ctrl+c"], ["Paste", "shortcut", "ctrl+v"],
-    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""], ["Move image", "trace", ""], ["Light", "light", ""], ["Mask", "mask", ""],
+    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""], ["Move image", "trace", ""], ["Light", "light", ""], ["Invert", "mask", ""],
   ],
 
   label(spec) {
@@ -924,7 +926,7 @@ const Panel = {
     if (b.kind === "clear") return "tablet ink";
     if (b.kind === "trace") return S.cfg.trace_adjust ? "moving" : "image";
     if (b.kind === "light") return S.cfg.light ? "on" : "off";
-    if (b.kind === "mask") return S.cfg.mask_edit ? "editing" : S.cfg.mask_on ? "on" : "off";
+    if (b.kind === "mask") return S.cfg.mask_invert ? "inverted" : "normal";
     return "";
   },
 
@@ -934,7 +936,7 @@ const Panel = {
     if (!this.btns || (!this.dirty && saved !== JSON.stringify(this.btns))) this.btns = JSON.parse(saved);
     if (view !== "panel") return;
     this.renderProfiles();
-    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.cfg.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_edit]);
+    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.cfg.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_invert]);
     if (sig !== this.sig) { this.sig = sig; this.draw(); }
     if (!this.recording && document.activeElement !== $("#peName") && document.activeElement !== $("#peKeys")) this.fill();
     this.renderTaps();
@@ -1224,7 +1226,7 @@ const Panel = {
       if (k === "clear" && !b.t) patch.t = "Clear";
       if (k === "trace" && !b.t) patch.t = "Image";
       if (k === "light" && !b.t) patch.t = "Light";
-      if (k === "mask" && !b.t) patch.t = "Mask";
+      if (k === "mask" && !b.t) patch.t = "Invert";
       if (k === "none") patch.t = "";
       this.edit(patch);
     };
@@ -1270,10 +1272,6 @@ function renderMasks() {
 }
 $("#maskSel").onchange = async e => { await api().pick_mask(e.target.value); maskSrc = null; refresh(); };
 $("#maskName").onchange = async e => { if (S.cfg.mask_active) await api().rename_mask(S.cfg.mask_active, e.target.value); refresh(); };
-$("#maskNew").onclick = async () => {
-  await api().new_mask(null); maskSrc = null; await refresh();
-  $("#maskName").focus(); $("#maskName").select();
-};
 {
   let armed = 0;
   $("#maskDel").onclick = async () => {  // two clicks, so a stray one can't lose a mask
@@ -1286,6 +1284,10 @@ $("#maskNew").onclick = async () => {
   };
 }
 
+async function maskInvert() {
+  await setKey("mask_invert", !S.cfg.mask_invert);
+  refresh();
+}
 async function maskOp(op) {
   await api().mask_op(op);
   maskSrc = null;  // reloads from the PC
@@ -1300,9 +1302,10 @@ function maskFromImage(input) {
   const img = new Image(), url = URL.createObjectURL(file);
   img.onload = async () => {
     URL.revokeObjectURL(url);
+    await api().new_mask(file.name.replace(/\.[^.]*$/, "").slice(0, 24) || null);  // each image is a mask of its own
     maskSrc = { el: img, grid: false, s: 1, ox: 0, oy: 0, ver: null };
     await maskCommit(maskSrc);
-    toast("Mask made from " + file.name + ". On the Screen area picture, drag it into place and zoom it with the wheel.");
+    toast("Mask added from " + file.name + ". On the Screen area picture, drag it into place and zoom it with the wheel.");
     dragWhat = "mask";
     for (const x of $$("#dragWhat button")) x.classList.toggle("on", x.dataset.v === "mask");
     dragHint();

@@ -282,11 +282,6 @@ class TraceMask(Profiles):
         e.set("mask_mode", "bogus")
         self.assertEqual(e.cfg["mask_mode"], "fade")
 
-    def test_editing_keeps_the_pen_from_windows(self):
-        e = self.engine({"mask_edit": True})
-        e.mapper, e.cal = object(), None
-        self.assertTrue(e.masked(self.state(1, 1)))
-
     def test_contrast_applies_over_the_stored_mask(self):
         e = self.masked_engine(mask_on=True)
         lv = bytearray(self.N * self.N)
@@ -297,17 +292,22 @@ class TraceMask(Profiles):
         self.assertEqual(e.pmask.raw[:2], bytearray([64, 191]))   # stored as it was
         self.assertEqual(e.mask_level(self.cell(1, 0)), 255)
 
-    def test_painting_and_dragging_on_the_tablet(self):
+    def test_invert_toggles_over_the_stored_mask(self):
         e = self.masked_engine()
-        e.tablet_action(f"maskpaint 255 0.01 0.01 0.5 0.5")
-        self.assertTrue(e.cfg["mask_on"])
-        self.assertTrue(e.masked(self.state(3600, 3600)))
-        self.assertFalse(e.masked(self.state(3600 + 200, 3600)))   # radius 1% = 72 units
-        e.tablet_action("maskmove 0.1 0")
-        self.assertFalse(e.masked(self.state(3600, 3600)))
-        self.assertTrue(e.masked(self.state(3600 + 720, 3600)))
-        e.tablet_action("maskpaint 0 0.02 0.02 0.6 0.5")              # the eraser end
-        self.assertFalse(e.masked(self.state(3600 + 720, 3600)))
+        e.tablet_action("maskinvert")                 # no mask yet: nothing happens
+        self.assertFalse(e.cfg["mask_invert"])
+        a = e.new_mask()
+        self.assertFalse(e.masked(self.cell(0, 0)))
+        e.tablet_action("maskinvert")                 # the strip's Invert tile
+        self.assertTrue(e.cfg["mask_invert"])
+        self.assertTrue(e.masked(self.cell(0, 0)))
+        self.assertEqual(e.pmask.raw[0], 0)           # stored as it was
+        b = e.new_mask()
+        self.assertFalse(e.cfg["mask_invert"])        # each mask keeps its own
+        e.pick_mask(a)
+        self.assertTrue(e.cfg["mask_invert"])
+        e.set("mask_invert", False)
+        self.assertFalse(e.masked(self.cell(0, 0)))
 
     def test_a_library_of_masks(self):
         e = self.masked_engine()
@@ -331,13 +331,7 @@ class TraceMask(Profiles):
         e.delete_mask(a)
         self.assertEqual(e.cfg["mask_active"], b)
         e.rename_mask(b, "  Ruler  ")
-        self.assertEqual(e.cfg["masks"], [{"id": b, "name": "Ruler", "contrast": 1.0, "mode": "fade"}])
-
-    def test_painting_without_a_mask_makes_one(self):
-        e = self.masked_engine()
-        e.tablet_action("maskpaint 255 0.01 0.01 0.5 0.5")
-        self.assertEqual(len(e.cfg["masks"]), 1)
-        self.assertTrue(e.masked(self.state(3600, 3600)))
+        self.assertEqual(e.cfg["masks"], [{"id": b, "name": "Ruler", "contrast": 1.0, "mode": "fade", "invert": False}])
 
     def test_old_hex_masks_carry_over(self):
         old = "8" + "0" * (72 * 72 // 4 - 1)  # 1-bit format: only the first cell set

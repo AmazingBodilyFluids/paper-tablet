@@ -35,10 +35,10 @@ handle undo, redo, pan and zoom.
   your strokes, and a tracing image you can move and zoom with your fingers. The front light can go to full
   while you trace, and comes back to your level afterwards.
 - **Pen mask (Screen area page).** Works like a stencil in shades of grey: black ignores the pen, white leaves it
-  alone, and grey either fades the pressure (mid grey gives half) or needs a firmer press. Paint it on the
-  tablet and drag it where you need it, or make it from any image, read in greyscale, and place and zoom it on
-  the Screen area picture. Keep as many named masks as you like and switch between them from a strip on the
-  tablet, on the side away from the shortcut panel.
+  alone, and grey either fades the pressure (mid grey gives half) or needs a firmer press. Add a mask from any
+  image, read in greyscale, then place and zoom it on the Screen area picture, with a contrast setting and an
+  Invert toggle on top. Keep as many named masks as you like and switch between them, or invert the one in use,
+  from a corner tab on the tablet, on the side away from the shortcut panel.
 - **Finger gestures:**
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.
