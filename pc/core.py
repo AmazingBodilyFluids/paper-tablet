@@ -39,7 +39,7 @@ DEFAULTS = {
     "auto_connect": True, "auto_output": True, "auto_screen": True, "trail_ms": 1500,
     "onboarded": False,
     # window: colour theme (web/themes.css), and whether closing the window keeps the app in the tray
-    "theme": "default", "close_to_tray": True,
+    "theme": "intaglio", "close_to_tray": True,
     # hold-to-snap shapes
     "snap": True, "snap_hold_ms": 600, "snap_apps": ", ".join(shapes.DRAWING_APPS),
     # tablet-screen side panel with shortcut buttons: left | right | off

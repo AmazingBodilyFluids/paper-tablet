@@ -53,7 +53,7 @@ def saved_theme():
             theme = json.load(f).get("gui", {}).get("theme")
     except (OSError, ValueError):
         theme = None
-    return theme if theme in THEME_BG else "default"
+    return theme if theme in THEME_BG else "intaglio"
 
 
 def place_window(title, width, height):

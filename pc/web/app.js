@@ -105,7 +105,7 @@ function render() {
   $("#swScreen2").disabled = !S.connected;
   $("#scrState").textContent = S.screen ? "On. The notebook app is paused." : (S.connected ? "Off" : "Connect the tablet first");
 
-  if (Date.now() > themeHold) applyTheme(S.cfg.theme || "default");
+  if (Date.now() > themeHold) applyTheme(S.cfg.theme || "intaglio");
 
   // bound settings
   for (const el of $$("[data-key]")) {
