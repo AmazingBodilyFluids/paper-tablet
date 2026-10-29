@@ -93,3 +93,20 @@ class Compositor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Touch(unittest.TestCase):
+    def test_contacts_down_move_up(self):
+        t = L.LinuxTouch(box=(0, 0, 1920, 1080), make=FakeDev)
+        t.update({"a": (100, 200)})
+        t.update({"a": (110, 200), "b": (500, 600)})
+        t.update({"b": (505, 600)})
+        t.update({})
+        frames = t.dev.out
+        self.assertIn((L.EV_KEY, L.BTN_TOUCH, 1), frames[0])
+        self.assertIn((L.EV_ABS, L.ABS_MT_TRACKING_ID, 1), frames[0])
+        self.assertIn((L.EV_ABS, L.ABS_MT_SLOT, 1), frames[1])          # b gets the next slot
+        self.assertIn((L.EV_ABS, L.ABS_MT_TRACKING_ID, 2), frames[1])
+        self.assertIn((L.EV_ABS, L.ABS_MT_TRACKING_ID, -1), frames[2])  # a lifted
+        self.assertIn((L.EV_KEY, L.BTN_TOUCH, 0), frames[3])
+        self.assertEqual(t.slots, {})

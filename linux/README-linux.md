@@ -32,6 +32,10 @@ Log out and back in once afterwards. Then start Paper Tablet from the launcher, 
   Keys" / "Paper Tablet Mouse").
 - **Monitors and the focused app** come from `hyprctl` on Hyprland, and from `xrandr` elsewhere. Hold-to-snap
   uses the focused window's app name (for example `krita`, `gimp`) for its allow-list.
+- **"Windows touch" works on Linux too.** That profile setting creates a virtual touchscreen ("Paper Tablet
+  Touch"), so apps scroll with inertia and pinch-zoom by themselves. With more than one monitor, Hyprland binds a
+  touchscreen to a single output; if touches land on the wrong screen, set `input:touchdevice:output` to the
+  monitor you chose on the *Screen area* page.
 - **There is no splash screen and no tray icon on Linux.**
 
 ## Things to check if something's off

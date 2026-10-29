@@ -30,6 +30,9 @@ SYN_REPORT = 0
 ABS_X, ABS_Y, ABS_PRESSURE, ABS_TILT_X, ABS_TILT_Y = 0x00, 0x01, 0x18, 0x1A, 0x1B
 BTN_LEFT, BTN_RIGHT, BTN_MIDDLE = 0x110, 0x111, 0x112
 BTN_TOOL_PEN, BTN_TOOL_RUBBER, BTN_TOUCH, BTN_STYLUS, BTN_STYLUS2 = 0x140, 0x141, 0x14A, 0x14B, 0x14C
+ABS_MT_SLOT, ABS_MT_POSITION_X, ABS_MT_POSITION_Y, ABS_MT_TRACKING_ID = 0x2F, 0x35, 0x36, 0x39
+BTN_TOOL_FINGER = 0x145
+INPUT_PROP_DIRECT = 0x01
 REL_WHEEL = 0x08
 BUS_VIRTUAL = 0x06
 EVENT = struct.Struct("llHHi")  # struct input_event: timeval, type, code, value
@@ -151,6 +154,63 @@ class LinuxPen:
 
     def close(self):
         if self.dev:
+            self.dev.close()
+            self.dev = None
+
+
+class LinuxTouch:
+    """Virtual touchscreen (multitouch protocol B), for profiles that hand fingers to the desktop:
+    apps then scroll with their own inertia and pinch-zoom. Same update() as rmtablet.WindowsTouch:
+    every contact that is down, {id: (x, y)} in layout pixels; missing ones are lifted."""
+
+    MAX = 10
+
+    def __init__(self, box=None, make=UInput):
+        self.box = box or layout_box()
+        l, t, r, b = self.box
+        w, h = max(1, r - l - 1), max(1, b - t - 1)
+        self.dev = make("Paper Tablet Touch", keys=(BTN_TOUCH, BTN_TOOL_FINGER),
+                        abs_axes={ABS_X: (0, w, 10), ABS_Y: (0, h, 10), ABS_MT_SLOT: (0, self.MAX - 1, 0),
+                                  ABS_MT_TRACKING_ID: (0, 65535, 0),
+                                  ABS_MT_POSITION_X: (0, w, 10), ABS_MT_POSITION_Y: (0, h, 10)},
+                        props=(INPUT_PROP_DIRECT,), vendor=0x2D1F, product=0x0003)
+        self.slots = {}  # contact id -> slot
+        self.next_id = 1
+
+    def update(self, contacts):
+        l, t, r, b = self.box
+        ev, keep = [], {}
+        for cid, slot in self.slots.items():
+            if cid not in contacts:
+                ev += [(EV_ABS, ABS_MT_SLOT, slot), (EV_ABS, ABS_MT_TRACKING_ID, -1)]
+        first = None
+        for cid, (x, y) in list(contacts.items())[:self.MAX]:
+            x, y = min(max(x - l, 0), r - l - 1), min(max(y - t, 0), b - t - 1)
+            slot = self.slots.get(cid)
+            ev.append((EV_ABS, ABS_MT_SLOT, slot if slot is not None else 0))
+            if slot is None:
+                slot = next(i for i in range(self.MAX) if i not in keep.values() and i not in self.slots.values())
+                ev[-1] = (EV_ABS, ABS_MT_SLOT, slot)
+                ev.append((EV_ABS, ABS_MT_TRACKING_ID, self.next_id))
+                self.next_id = self.next_id % 65535 + 1
+            ev += [(EV_ABS, ABS_MT_POSITION_X, x), (EV_ABS, ABS_MT_POSITION_Y, y)]
+            keep[cid] = slot
+            first = first or (x, y)
+        down = bool(keep)
+        if down != bool(self.slots):
+            ev += [(EV_KEY, BTN_TOUCH, int(down)), (EV_KEY, BTN_TOOL_FINGER, int(down))]
+        if first:
+            ev += [(EV_ABS, ABS_X, first[0]), (EV_ABS, ABS_Y, first[1])]
+        self.slots = keep
+        if ev:
+            self.dev.emit(ev)
+
+    def lift_all(self):
+        self.update({})
+
+    def close(self):
+        if self.dev:
+            self.lift_all()
             self.dev.close()
             self.dev = None
 

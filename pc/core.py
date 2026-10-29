@@ -1303,7 +1303,11 @@ class Engine:
             return
         if self.touch_out is None:
             try:
-                self.touch_out = rt.WindowsTouch() if sys.platform == "win32" else None
+                if sys.platform == "win32":
+                    self.touch_out = rt.WindowsTouch()
+                else:
+                    import linuxinput
+                    self.touch_out = linuxinput.LinuxTouch()
             except OSError as ex:
                 self.set_status("error", f"Windows touch isn't available: {ex}")
                 return
