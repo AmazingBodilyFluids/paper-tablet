@@ -2,6 +2,7 @@
 0 = open .. 255 = the pen does nothing in Windows. Kept as a zlib file next to the settings; the
 contrast setting is applied over it, so the stored mask never changes when the contrast does."""
 import base64
+import itertools
 import math
 import os
 import struct
@@ -11,6 +12,8 @@ import zlib
 N = 720           # cells across and down: about 0.25 x 0.33 mm each on the Paper Pro
 FULL = 250        # from here up the pen leaves Windows altogether
 _OLD_N = 72
+THUMB = 120       # thumbnail cells across and down, for the tablet's mask strip
+_versions = itertools.count(1)  # one sequence for every mask, so a version names one mask's state
 
 
 def legacy(h):
@@ -73,7 +76,7 @@ class Mask:
             self.table = contrast_table(k)
             self.eff = bytes(self.raw).translate(self.table)
             self.cov = sum(self.eff) / (255 * N * N)
-            self.ver += 1
+            self.ver = next(_versions)
 
     def level(self, p, q):
         c, r = min(N - 1, max(0, int(p * N))), min(N - 1, max(0, int(q * N)))
@@ -81,6 +84,17 @@ class Mask:
 
     def png(self):
         return png_la(self.eff)
+
+    def thumb(self):
+        """A small version for the tablet's mask strip (each thumbnail cell: the darkest it covers)."""
+        f = N // THUMB
+        rows = [self.eff[r * N:(r + 1) * N] for r in range(N)]
+        out = bytearray(THUMB * THUMB)
+        for tr in range(THUMB):
+            block = rows[tr * f:(tr + 1) * f]
+            for tc in range(THUMB):
+                out[tr * THUMB + tc] = max(max(row[tc * f:(tc + 1) * f]) for row in block)
+        return png_la(out, THUMB)
 
     def coverage(self):
         """How much of the screen is masked, 0..1 (as used, after the contrast)."""
@@ -90,7 +104,7 @@ class Mask:
     def _changed(self):
         self.eff = bytes(self.raw).translate(self.table)
         self.cov = sum(self.eff) / (255 * N * N)
-        self.ver += 1
+        self.ver = next(_versions)
         if self.path:
             tmp = self.path + ".tmp"
             with open(tmp, "wb") as f:

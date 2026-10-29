@@ -243,8 +243,11 @@ class TraceMask(Profiles):
         e.mapper = rt.Mapper(absinfo={"X": {"min": 0, "max": 7199}, "Y": {"min": 0, "max": 7199},
                                       "PRESSURE": {"min": 0, "max": 4096}}, monitor=(0, 0, 1920, 1080), fit="stretch")
         e.cal = None
-        e.pmask = penmask.Mask()
+        e.cfg["masks"], e.masks, e.blank = [], {}, penmask.Mask()
+        e.mask_path = lambda mid: None
         e.push_mask = lambda: e.companion.lines.append("maskimg")
+        e.push_strip = lambda: None
+        e.use_mask("")
         return e
 
     def cell(self, c, r):  # the middle of a cell, in digitizer units (7200 / N per cell)
@@ -305,6 +308,36 @@ class TraceMask(Profiles):
         self.assertTrue(e.masked(self.state(3600 + 720, 3600)))
         e.tablet_action("maskpaint 0 0.02 0.02 0.6 0.5")              # the eraser end
         self.assertFalse(e.masked(self.state(3600 + 720, 3600)))
+
+    def test_a_library_of_masks(self):
+        e = self.masked_engine()
+        self.assertFalse(e.masked(self.cell(0, 0)))
+        a = e.new_mask()
+        e.mask_op("invert")                       # all black
+        self.assertEqual(e.cfg["mask_active"], a)
+        self.assertTrue(e.masked(self.cell(0, 0)))
+        e.set("mask_contrast", 2.0)
+        b = e.new_mask("Rails")
+        self.assertEqual([m["name"] for m in e.cfg["masks"]], ["Mask 1", "Rails"])
+        self.assertFalse(e.masked(self.cell(0, 0)))  # the new one is empty
+        self.assertEqual(e.cfg["mask_contrast"], 1.0)
+        e.tablet_action(f"maskpick {a}")
+        self.assertTrue(e.masked(self.cell(0, 0)))
+        self.assertEqual(e.cfg["mask_contrast"], 2.0)  # each mask keeps its own settings
+        e.tablet_action("maskpick none")
+        self.assertFalse(e.cfg["mask_on"])
+        self.assertFalse(e.masked(self.cell(0, 0)))
+        e.pick_mask(a)
+        e.delete_mask(a)
+        self.assertEqual(e.cfg["mask_active"], b)
+        e.rename_mask(b, "  Ruler  ")
+        self.assertEqual(e.cfg["masks"], [{"id": b, "name": "Ruler", "contrast": 1.0, "mode": "fade"}])
+
+    def test_painting_without_a_mask_makes_one(self):
+        e = self.masked_engine()
+        e.tablet_action("maskpaint 255 0.01 0.01 0.5 0.5")
+        self.assertEqual(len(e.cfg["masks"]), 1)
+        self.assertTrue(e.masked(self.state(3600, 3600)))
 
     def test_old_hex_masks_carry_over(self):
         old = "8" + "0" * (72 * 72 // 4 - 1)  # 1-bit format: only the first cell set

@@ -62,6 +62,27 @@ Window {
     // the pen paints it (eraser end clears) and one finger drags it; both go to the PC, which sends
     // the new image back. Until then the dabs and the drag show here.
     property string maskSrc: ""
+    // the mask strip: the PC's masks down the side away from the panel; a tap picks one
+    property bool stripOn: false
+    property string stripSide: "right"
+    property real stripFrac: 0
+    property var maskList: []            // [{id, name, thumb}]
+    property string maskActive: ""
+    property bool stripPen: false        // the pen went down in the strip: nothing else until it lifts
+    readonly property real stripW: mode === "ink" && stripOn ? stripFrac * view.width : 0
+    readonly property real stripX: stripSide === "right" ? view.width - stripW : 0
+    readonly property real stripThumbH: (stripW - 24) * view.height / view.width
+    readonly property real stripTileH: stripThumbH + 46
+    function inStrip(p) { return stripW > 0 && p.x >= stripX && p.x < stripX + stripW }
+    function stripPick(p) {  // None at the top, then a thumbnail and name per mask
+        var id = null
+        if (p.y >= 70 && p.y < 140) id = "none"
+        else if (p.y >= 150) {
+            var i = Math.floor((p.y - 150) / (stripTileH + 10))
+            if (i < maskList.length && (p.y - 150) - i * (stripTileH + 10) < stripTileH) id = maskList[i].id
+        }
+        if (id !== null) act("maskpick " + id)
+    }
     property bool maskOn: false
     property bool maskEdit: false
     property real maskBrush: 45          // brush radius, view pixels
@@ -100,6 +121,8 @@ Window {
     onMaskOnChanged: refreshScreen()
     onMaskEditChanged: refreshScreen()
     onMaskSrcChanged: refreshScreen()
+    onMaskListChanged: refreshScreen()
+    onStripWChanged: refreshScreen()
     onMaskDXChanged: refreshScreen()
     onMaskDYChanged: refreshScreen()
     onAreaChanged: refreshScreen()
@@ -156,7 +179,9 @@ Window {
         else if (c === "mask") {  // mask <on> <edit> <hex>
             maskOn = a[0] === "1"; maskEdit = a[1] === "1"
         }
-        else if (c === "maskimg") { maskSrc = ""; maskSrc = "file://" + a.join(" ") }
+        else if (c === "maskimg") { maskSrc = ""; if (a.length && a[0]) maskSrc = "file://" + a.join(" ") }
+        else if (c === "maskstrip") { stripOn = a[0] === "1"; stripSide = a[1] || "right"; stripFrac = parseFloat(a[2]) || 0 }
+        else if (c === "masks") { var m = JSON.parse(a.join(" ")); maskActive = m.active; maskList = m.list }
         else if (c === "profile") { profileCount = parseInt(a[1]); profileName = a.slice(2).join(" ") }
         else if (c === "gestures") {
             gesturesOn = a[0] === "1"
@@ -324,6 +349,12 @@ Window {
             if (gMode !== "" && gMode !== "dead") { endGesture(); sendTouch() }  // the pen came back: a hand on the screen is a palm
         }
         var p = view.mapFromItem(win.contentItem, px, py)
+        if (stripPen || (touching && inStrip(p))) {  // the mask strip takes the pen; so does the PC
+            endStroke()
+            if (touching && !stripPen) { stripPen = true; stripPick(p) }
+            if (!touching) stripPen = false
+            return
+        }
         if (penBtn !== -1 || (touching && inPanel(p))) {
             // the panel takes the pen; the PC ignores the pen over the panel too
             endStroke()
@@ -637,8 +668,8 @@ Window {
         Item {
             id: paperArea
             visible: win.mode === "ink"
-            x: win.panelSide === "left" ? win.panelW : 0
-            width: view.width - win.panelW; height: view.height
+            x: (win.panelSide === "left" ? win.panelW : 0) + (win.stripSide === "left" ? win.stripW : 0)
+            width: view.width - win.panelW - win.stripW; height: view.height
             clip: true
             Image {
                 visible: win.traceSrc !== ""
@@ -751,6 +782,39 @@ Window {
             x: win.area[0] * view.width; y: win.area[1] * view.height
             width: (win.area[2] - win.area[0]) * view.width; height: (win.area[3] - win.area[1]) * view.height
             color: "transparent"; border.color: "black"; border.width: 2
+        }
+
+        // ---------------------------------------------------------------- mask strip
+        Item {
+            visible: win.stripW > 0
+            x: win.stripX; width: win.stripW; height: view.height
+            Rectangle { anchors.fill: parent; color: "white" }
+            Rectangle { x: win.stripSide === "right" ? 0 : parent.width - 3; width: 3; height: parent.height; color: "black" }
+            Text { x: 0; y: 22; width: parent.width; horizontalAlignment: Text.AlignHCenter; text: "MASKS"
+                   font.pixelSize: 22; font.bold: true; font.letterSpacing: 4; color: "black" }
+            Rectangle {  // None
+                x: 12; y: 70; width: parent.width - 24; height: 70; radius: 12
+                color: win.maskActive === "" ? "black" : "white"; border.width: 3; border.color: "black"
+                Text { anchors.centerIn: parent; text: "None"; font.pixelSize: 24; font.bold: true
+                       color: win.maskActive === "" ? "white" : "black" }
+            }
+            Repeater {
+                model: win.maskList
+                Item {
+                    property bool on: modelData.id === win.maskActive
+                    x: 12; y: 150 + index * (win.stripTileH + 10); width: parent.width - 24; height: win.stripTileH
+                    visible: y + height <= view.height
+                    Rectangle { width: parent.width; height: win.stripThumbH; color: "white"
+                                border.width: parent.on ? 7 : 2; border.color: "black" }
+                    Image { x: 4; y: 4; width: parent.width - 8; height: win.stripThumbH - 8
+                            source: modelData.thumb ? "file://" + modelData.thumb : ""; cache: false; smooth: true }
+                    Rectangle { y: win.stripThumbH + 4; width: parent.width; height: 38; radius: 8
+                                color: parent.on ? "black" : "white" }
+                    Text { y: win.stripThumbH + 4; width: parent.width; height: 38; verticalAlignment: Text.AlignVCenter
+                           horizontalAlignment: Text.AlignHCenter; text: modelData.name; elide: Text.ElideRight
+                           font.pixelSize: 21; font.bold: true; color: parent.on ? "white" : "black" }
+                }
+            }
         }
 
         // ---------------------------------------------------------------- side panel
@@ -868,6 +932,11 @@ Window {
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i], p = Qt.point(t.x, t.y)
                     console.warn("LOG:touch " + Math.round(t.x) + "," + Math.round(t.y) + " size " + Math.round(win.touchSize(t)))
+                    if (win.inStrip(p)) {  // a mask tile: picked at once, the finger does nothing more
+                        var tbs = win.touchBtn; tbs[t.pointId] = -1; win.touchBtn = tbs
+                        win.stripPick(p)
+                        continue
+                    }
                     if (win.inPanel(p)) {  // the panel answers even with the pen hovering: the other hand taps it
                         var tb = win.touchBtn; tb[t.pointId] = win.pressAt(p); win.touchBtn = tb
                         continue

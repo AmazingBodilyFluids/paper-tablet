@@ -181,8 +181,16 @@
           </div>
           <div class="pane">
             <div class="pane-title">Pen mask</div>
+            <div class="prof-row">
+              <select class="input" id="maskSel" title="Your masks: switch between them here or in the strip on the tablet"></select>
+              <input class="input" id="maskName" maxlength="24" placeholder="Mask name" title="Rename this mask">
+              <button class="btn" id="maskNew" title="A new, empty mask">New</button>
+              <button class="btn ghost" id="maskDel">Delete</button>
+            </div>
             <div class="opt"><div class="tx"><div class="t1">Use the mask</div><div class="t2">Shaded parts of the tablet screen hold the pen back, like a stencil: dark ignores it, white leaves it alone, grey is in between. <span id="maskInfo"></span></div></div>
               <label class="switch"><input type="checkbox" data-key="mask_on"><span class="track"></span></label></div>
+            <div class="opt"><div class="tx"><div class="t1">Mask strip on the tablet</div><div class="t2">Your masks down the side away from the shortcut panel: tap one to switch, or None.</div></div>
+              <label class="switch"><input type="checkbox" data-key="mask_panel"><span class="track"></span></label></div>
             <div class="opt" style="display:block"><div class="range-row"><span>Contrast</span><input type="range" min="0.25" max="6" step="0.25" data-key="mask_contrast" data-type="float"><span class="v" id="maskConV"></span></div>
               <p class="hint mts">Left of the middle softens the mask towards mid grey; right pushes greys to black or white, until it's a hard cut-out.</p></div>
             <div class="opt"><div class="tx"><div class="t1">Grey areas</div><div class="t2" id="maskModeHint"></div></div>
