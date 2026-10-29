@@ -125,11 +125,14 @@ Copy-Item (Join-Path $Repo "pc\requirements.txt") $pcOut
 Copy-Item (Join-Path $Repo "pc\web") $pcOut -Recurse
 Copy-Item (Join-Path $Repo "pc\icons") $pcOut -Recurse
 # Linux binaries and a shell script for the tablet: Copy-Item keeps the bytes (and run.sh's LF).
-foreach ($f in "tablet\rmpp-pen", "tablet\companion\rmpp-companion", "tablet\companion\run.sh") {
+# One pen helper per CPU (64-bit Paper Pro, 32-bit rM1 / rM2) and one tablet-screen app per model.
+$TabletFiles = "tablet\rmpp-pen", "tablet\rmpp-pen-armv7", "tablet\companion\rmpp-companion",
+    "tablet\companion\rmpp-companion-rm2", "tablet\companion\rmpp-companion-rm1", "tablet\companion\run.sh"
+foreach ($f in $TabletFiles) {
     Copy-Item (Join-Path $Repo $f) (Join-Path $Stage $f)
 }
 Copy-Item (Join-Path $Repo "tablet\*.pdf") (Join-Path $Stage "tablet")
-foreach ($f in "tablet\rmpp-pen", "tablet\companion\rmpp-companion", "tablet\companion\run.sh") {
+foreach ($f in $TabletFiles) {
     $a = (Get-FileHash (Join-Path $Repo $f)).Hash
     $b = (Get-FileHash (Join-Path $Stage $f)).Hash
     if ($a -ne $b) { throw "$f changed while copying" }

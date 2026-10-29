@@ -20,6 +20,7 @@ import threading
 import time
 
 import rmtablet as rt
+import devices
 import keys
 import penmask
 import paths
@@ -34,7 +35,8 @@ TARGET_NAMES = ["top-left", "top-middle", "top-right", "middle-left", "centre", 
              "bottom-left", "bottom-middle", "bottom-right"]
 CORNER_NAMES = ["top-left", "top-right", "bottom-right", "bottom-left"]
 DEFAULTS = {
-    "host": "10.11.99.1", "user": "root", "key": "", "monitor": 0, "fit": "crop", "edge_lift": True,
+    "host": "10.11.99.1", "user": "root", "key": "",
+    "model": "ferrari",     # the last reMarkable model seen (devices.py), so the pages fit it before it connects "monitor": 0, "fit": "crop", "edge_lift": True,
     "orientation": "as-calibrated", "area": [0.0, 0.0, 1.0, 1.0], "gamma": 1.0, "threshold": 0.0,
     "tilt": True, "grab": False, "feedback": "indirect", "companion_rot": "Match calibration",
     # plug-and-play
@@ -106,7 +108,6 @@ MASK_N = penmask.N
 # contact to Windows as real touch, so apps do their own scrolling, zooming and inertia
 TOUCH_MODES = ("shortcuts", "windows")
 PAPERS = ("plain", "lined", "squared", "dots", "cross", "blueprint", "isometric")
-PANEL_PX_PER_MM = 2160 / 239.6  # Paper Pro: 1620 x 2160 px on a 179.7 x 239.6 mm panel (229 ppi)
 TRACE_MAX_BYTES = 30 * 1024 * 1024
 FRONTLIGHT = "/sys/class/backlight/rm_frontlight"
 
@@ -354,8 +355,9 @@ class Companion:
         self.tab, self.trace_sent, self.mask_sent, self.thumb_sent = tab, None, {}, {}
         src = os.path.join(rt.HERE, "..", "tablet", "companion")
         tab.run(f"mkdir -p {self.REMOTE}")
-        for name in self.FILES:
-            with open(os.path.join(src, name), "rb") as f:
+        for name in self.FILES:  # the app built for this model, under the one name run.sh starts
+            local = self.engine.model.companion if name == "rmpp-companion" else name
+            with open(os.path.join(src, local), "rb") as f:
                 tab.run(f"cat > {self.REMOTE}/{name} && chmod 755 {self.REMOTE}/{name}", f.read())
         chan = tab.client.get_transport().open_session()
         chan.exec_command(f"sh {self.REMOTE}/run.sh 2>&1")
@@ -382,7 +384,7 @@ class Companion:
         if "first frame drawn" in line:
             self.engine.refresh_mapper()  # the side panel now takes part of the tablet
             self.engine.sync_companion()
-            if self.engine.cfg.get("light"):
+            if self.engine.cfg.get("light") and self.engine.model.frontlight:
                 threading.Thread(target=self.light, args=(True,), daemon=True).start()
             self.engine.changed()
         if line == "companion: closed":
@@ -445,7 +447,7 @@ class Worker(threading.Thread):
             self.snapper = shapes.Snapper(e.mapper, send=lambda f: None, hold_ms=e.cfg["snap_hold_ms"],
                                           allowed=e.snap_allowed, on_snap=e.on_snap,
                                           undo=lambda: e.keys.combo(keys.SHORTCUTS["undo"]))
-            parser = rt.EvdevParser(rt.event_format(info))
+            parser = rt.EvdevParser(rt.event_format(info), pen)
             was_down = False
             grabbed = None
             usb = e.cfg["host"].startswith("10.11.99.")
@@ -463,7 +465,7 @@ class Worker(threading.Thread):
                         self.chan.close()
                     self.chan = self.tab.stream(pen["path"], grab=want)
                     self.chan.settimeout(0.05)  # wake often enough to notice the pen resting
-                    parser = rt.EvdevParser(rt.event_format(info))
+                    parser = rt.EvdevParser(rt.event_format(info), pen)
                     grabbed = want
                 try:
                     chunk = self.chan.recv(65536)
@@ -563,6 +565,7 @@ class Engine:
         if (self.calibration or {}).get("homography"):
             self.cfg["orientation"] = "as-calibrated"
         self.info = self.pen = None
+        self.set_model(devices.MODELS.get(self.cfg.get("model"), devices.DEFAULT))
         self.worker = None
         self.companion = Companion(self)
         self.output_on = False
@@ -627,6 +630,8 @@ class Engine:
             "output": self.output_on, "screen": self.companion.running,
             "device": self.pen and {"name": self.pen["name"], "kernel": self.info.get("release", ""),
                                     "tilt": "TILT_X" in self.pen["abs"]},
+            "model": {"key": self.model.key, "name": self.model.name, "verified": self.model.verified,
+                      "frontlight": self.model.frontlight, "developer_mode": self.model.developer_mode},
             "monitors": mon, "calibration": cal, "calibrating": calibrating, "cal_result": self.cal_result,
             "cal_modes": {k: v["label"] for k, v in CAL_MODES.items()},
             "rotations": list(ROTATIONS), "aspect": self.mapper.oriented_aspect(),
@@ -703,6 +708,10 @@ class Engine:
                 val = max(0.25, min(8.0, float(val)))
             if key == "mask_mode" and val not in MASK_MODES:
                 val = "fade"
+            if key == "model":  # picked in the setup guide; the tablet itself says once it connects
+                if val not in devices.MODELS:
+                    val = devices.DEFAULT.key
+                self.set_model(devices.MODELS[val])
             self.cfg[key] = val
             if key == "mask_invert":
                 val = bool(val)
@@ -725,7 +734,7 @@ class Engine:
         if key in ("mask_contrast", "mask_invert"):
             self.push_mask()
             self.push_strip()
-        if key == "light" and self.companion.running:
+        if key == "light" and self.companion.running and self.model.frontlight:
             threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
             self.companion.send("toast Front light: " + ("full" if val else "back to your level"))
         if key == "panel_profile" and self.companion.running:
@@ -737,7 +746,8 @@ class Engine:
 
     def view_size(self):
         """The tablet screen as it sits on the desk, in panel pixels (width, height)."""
-        return (2160, 1620) if self.companion_rotation() % 2 else (1620, 2160)
+        w, h = self.model.screen
+        return (h, w) if self.companion_rotation() % 2 else (w, h)
 
     def panel_shown(self):
         return (self.cfg.get("panel", "left") != "off" and self.companion.running and self.cal is None)
@@ -1081,7 +1091,10 @@ class Engine:
         elif name == "traceadjust":
             self.set("trace_adjust", not self.cfg.get("trace_adjust"))
         elif name == "light":
-            self.set("light", not self.cfg.get("light"))
+            if not self.model.frontlight:
+                self.companion.send(f"toast The {self.model.name} has no front light")
+            else:
+                self.set("light", not self.cfg.get("light"))
         elif name == "profile" and arg in ("next", "prev"):
             self.set("panel_profile", self.cfg["panel_profile"] + (1 if arg == "next" else -1))
         elif name == "pen":
@@ -1188,7 +1201,8 @@ class Engine:
                          swap=cal.get("swap", False), flip_u=cal.get("flip_u", False), flip_v=cal.get("flip_v", False),
                          homography=cal.get("homography"), correction=cal.get("correction"), aspect=cal.get("aspect"),
                          pressure_gamma=float(self.cfg["gamma"]), pressure_threshold=float(self.cfg["threshold"]),
-                         area=tuple(self.effective_area()), edge_lift=bool(self.cfg["edge_lift"]))
+                         area=tuple(self.effective_area()), edge_lift=bool(self.cfg["edge_lift"]),
+                         invert_tilt_y=(self.pen or {}).get("invert_tilt_y", True))
 
     def refresh_mapper(self):
         absinfo = (self.pen or {}).get("abs") or {"X": {"min": 0, "max": 11180}, "Y": {"min": 0, "max": 15340},
@@ -1272,8 +1286,18 @@ class Engine:
         self.cal = None
         self.set_status("idle", "Disconnected. Press Connect, or unplug and plug in again.")
 
+    def set_model(self, model):
+        """The connected reMarkable: its screen, its size in mm and what it has (devices.py)."""
+        self.model = model
+        rt.PANEL_MM = model.panel_mm  # calibration size and shapes work in the panel's mm
+
     def on_connected(self, info, pen):
         self.info, self.pen = info, pen
+        model = devices.detect(info)
+        self.set_model(model)
+        if self.cfg.get("model") != model.key:
+            self.cfg["model"] = model.key
+            self.save()
         self.refresh_mapper()
         self.set_status("connected", "Connected")
         if self.cfg["auto_output"]:
@@ -1393,7 +1417,7 @@ class Engine:
         c.send("area " + " ".join(f"{a:.4f}" for a in self.effective_area()))
         c.send(f"fade {int(self.cfg['trail_ms'])}")
         c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))} light {int(bool(self.cfg.get('light')))}")
-        c.send(f"paper {self.cfg.get('paper', 'plain')} {float(self.cfg.get('paper_mm', 5)) * PANEL_PX_PER_MM:.1f}")
+        c.send(f"paper {self.cfg.get('paper', 'plain')} {float(self.cfg.get('paper_mm', 5)) * self.model.px_per_mm:.1f}")
         try:
             remote = c.trace_remote(self.cfg.get("trace_file"))
         except Exception as ex:

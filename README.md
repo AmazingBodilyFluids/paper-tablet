@@ -1,6 +1,7 @@
 # Paper Tablet
 
-**Use a reMarkable Paper Pro as a pressure-sensitive pen tablet for Windows.**
+**Use a reMarkable Paper Pro as a pressure-sensitive pen tablet for Windows.** The reMarkable 2 and 1
+are supported in beta.
 
 Plug the tablet into your PC with its USB cable and draw in Photoshop, Krita, Clip Studio, Illustrator or any
 Windows Ink app. You get pressure, tilt, hover and the eraser end. The tablet's own screen shows your
@@ -57,6 +58,9 @@ handle undo, redo, pan and zoom.
 ## Requirements
 
 - A **reMarkable Paper Pro** with **developer mode** turned on. Tested on software 3.29.
+- Or, in beta and not yet tested on real hardware, a **reMarkable 2** or **reMarkable 1** on software 3.28 or
+  newer (the tablet screen is built against that release's Qt). These need no developer mode: their cable
+  connection takes SSH as they come. They have no front light, so the light-pad option does nothing there.
 - **Windows 10 (1809 or newer) or Windows 11**, and the USB-C cable.
 - The installer and portable version bring everything else with them. Running from source needs Python 3.10+.
 

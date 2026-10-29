@@ -27,7 +27,8 @@ import time
 from dataclasses import dataclass, field
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HELPER_LOCAL = os.path.join(HERE, "..", "tablet", "rmpp-pen")
+TABLET_DIR = os.path.join(HERE, "..", "tablet")
+HELPER_LOCAL = os.path.join(TABLET_DIR, "rmpp-pen")  # 64-bit (Paper Pro); rmpp-pen-armv7 for rM1 / rM2
 CONFIG_PATH = os.path.join(HERE, "rmtablet.json")
 REMOTE_DIRS = ["/tmp", "/home/root"]
 
@@ -64,8 +65,11 @@ class Tablet:
         return chan.recv_exit_status(), out, err
 
     def install_helper(self):
-        """Copy rmpp-pen with `cat >` (works without sftp-server) and check it executes."""
-        with open(HELPER_LOCAL, "rb") as f:
+        """Copy rmpp-pen with `cat >` (works without sftp-server) and check it executes. The
+        binary is the one for the tablet's CPU: 64-bit on the Paper Pro, 32-bit on the rM1 / rM2."""
+        _, machine, _ = self.run("uname -m")
+        name = "rmpp-pen" if machine.strip().startswith(b"aarch64") else "rmpp-pen-armv7"
+        with open(os.path.join(TABLET_DIR, name), "rb") as f:
             blob = f.read()
         # Helpers left behind by an earlier session whose SSH side vanished get re-parented to
         # PID 1; some still hold an EVIOCGRAB, which keeps the pen from xochitl and the
@@ -116,7 +120,26 @@ def pick_pen(info, override=None):
     pens = [d for d in devs if "TOOL_PEN" in d["keys"] and "PRESSURE" in d["abs"] and "X" in d["abs"]]
     if not pens:
         raise RuntimeError("no pen digitizer found; run `info` and pass --device")
-    return pens[0]
+    return panel_pen(pens[0])
+
+
+def panel_pen(pen):
+    """The pen device as the rest of the app sees it: X / Y (and tilt) running with the panel's
+    pixels in portrait. The rM1 / rM2 Wacom digitizer is turned 270 degrees against the panel
+    (its X runs up the long side from the bottom, its Y to the right; libremarkable, MIT), so
+    its axes are swapped here and EvdevParser turns each report to match."""
+    pen = dict(pen)
+    wacom = "wacom" in pen.get("name", "").lower()
+    pen["rot"] = 270 if wacom else 0
+    pen["invert_tilt_y"] = not wacom  # the Paper Pro's Elan quirk (Mapper.tilt_xy)
+    if pen["rot"]:
+        a = dict(pen["abs"])
+        pen["raw_abs"] = pen["abs"]
+        a["X"], a["Y"] = pen["abs"]["Y"], pen["abs"]["X"]
+        if "TILT_X" in a and "TILT_Y" in a:
+            a["TILT_X"], a["TILT_Y"] = pen["abs"]["TILT_Y"], pen["abs"]["TILT_X"]
+        pen["abs"] = a
+    return pen
 
 
 def event_format(info):
@@ -149,8 +172,10 @@ class PenState:
 class EvdevParser:
     """Splits a byte stream into input_event records and yields a PenState copy per SYN_REPORT."""
 
-    def __init__(self, fmt):
+    def __init__(self, fmt, pen=None):
         self.st = struct.Struct(fmt)
+        # rM1 / rM2: turn each report to run with the panel (see panel_pen)
+        self.rot_x = (pen or {}).get("raw_abs", {}).get("X") if (pen or {}).get("rot") == 270 else None
         self.buf = b""
         self.state = PenState()
         self.dropping = False
@@ -167,7 +192,11 @@ class EvdevParser:
                 elif code == SYN_REPORT:
                     s.t = sec + usec / 1e6
                     if not self.dropping:
-                        yield PenState(**vars(s))
+                        out = PenState(**vars(s))
+                        if self.rot_x is not None:
+                            out.x, out.y = s.y, self.rot_x["max"] + self.rot_x["min"] - s.x
+                            out.tilt_x, out.tilt_y = s.tilt_y, -s.tilt_x
+                        yield out
                     self.dropping = False
             elif etype == EV_ABS:
                 if code == ABS_X: s.x = value
@@ -368,7 +397,8 @@ def _solve(a, b):
     return [m[i][n] / m[i][i] for i in range(n)]
 
 
-PANEL_MM = (179.8, 239.8)  # Paper Pro active area along raw X and raw Y (11.8" 4:3)
+PANEL_MM = (179.8, 239.8)  # active area along the panel's X and Y (portrait); the Paper Pro's
+# 11.8" 4:3 until the engine sets the connected model's (devices.py)
 
 
 def grid_targets(n, inset=0.1):
@@ -858,7 +888,7 @@ def cmd_calibrate(args):
     print("Put the tablet exactly where and how you will draw on it (any rotation is fine).")
     print("Tap as close to the screen corners as you can, as seen from where you sit:")
     chan = tab.stream(pen["path"], grab=True)  # grab so the taps don't hit xochitl buttons
-    parser = EvdevParser(event_format(info))
+    parser = EvdevParser(event_format(info), pen)
     tl = wait_for_tap(parser, chan, "TOP-LEFT corner")
     tr = wait_for_tap(parser, chan, "TOP-RIGHT corner")
     tab.close()
@@ -896,7 +926,8 @@ def build_mapper(args, pen):
                   flip_v=cal.get("flip_v", False), homography=cal.get("homography"),
                   correction=cal.get("correction"),
                   aspect=cal.get("aspect"), pressure_gamma=args.pressure_gamma,
-                  pressure_threshold=args.pressure_threshold, area=area)
+                  pressure_threshold=args.pressure_threshold, area=area,
+                  invert_tilt_y=pen.get("invert_tilt_y", True))
 
 
 def cmd_run(args):
@@ -915,7 +946,7 @@ def cmd_run(args):
                       f"{args.orientation}, tilt={'on' if has_tilt else 'off'}, "
                       f"tablet UI {'blocked (grab)' if args.grab else 'still active'}")
                 chan = tab.stream(pen["path"], grab=args.grab)
-                parser = EvdevParser(event_format(info))
+                parser = EvdevParser(event_format(info), pen)
                 delay = 1
                 for chunk in iter(lambda: chan.recv(65536), b""):
                     for state in parser.feed(chunk):

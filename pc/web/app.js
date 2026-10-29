@@ -96,7 +96,7 @@ function render() {
   else if (S.connected && !S.calibration) acts.append(button("Calibrate now", "acc", () => go("calibrate")));
   else if (S.status.kind === "error") acts.append(button("Try again", "", () => api().connect()));
 
-  $("#devName").textContent = S.device ? "reMarkable Paper Pro" : (S.ssh ? "Tablet found" : "Not connected");
+  $("#devName").textContent = S.device ? S.model.name + (S.model.verified ? "" : " (beta)") : (S.ssh ? "Tablet found" : "Not connected");
   $("#devMeta").textContent = S.device ? `${S.cfg.host} · kernel ${S.device.kernel}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
 
   setToggle("#swOutput", "#cardOutput", S.output, S.connected);
@@ -734,13 +734,17 @@ const Wizard = {
   msg: null,
   steps: ["Welcome", "Back up", "Developer mode", "Plug in", "Pair this computer", "Calibrate", "Done"],
 
+  MODELS: [["ferrari", "Paper Pro"], ["rm2", "reMarkable 2"], ["rm1", "reMarkable 1"]],
+  // Only the Paper Pro needs developer mode (and the reset and backup it brings); the rM1 / rM2
+  // answer on the cable as they are.
+  devMode() { return !S || !S.cfg.model || S.cfg.model === "ferrari"; },
   open() { this.isOpen = true; this.step = 0; this.msg = null; $("#wizard").classList.add("on"); this.render(); },
   close() { this.isOpen = false; $("#wizard").classList.remove("on"); },
 
   canNext() {
     switch (this.step) {
-      case 1: return this.backedUp;
-      case 2: return this.devOn;
+      case 1: return this.backedUp || !this.devMode();
+      case 2: return this.devOn || !this.devMode();
       case 3: return S && S.ssh;
       case 4: return this.keyOk || (S && S.connected);
       default: return true;
@@ -749,7 +753,7 @@ const Wizard = {
 
   // re-draw the body only when something it shows has changed, so clicks aren't lost mid-redraw
   sig() {
-    const v = !S ? null : this.step === 3 ? [S.link, S.ssh]
+    const v = !S ? null : this.step === 0 ? S.cfg.model : this.step === 3 ? [S.link, S.ssh]
       : this.step === 5 ? [S.connected, S.calibrating, S.cal_result, S.position, S.position_mismatch, !!S.calibration] : null;
     return JSON.stringify([this.step, v]);
   },
@@ -777,7 +781,7 @@ const Wizard = {
     const S_ = S || { link: false, ssh: false, cfg: {} };
     switch (this.step) {
       case 0: return `
-        <div class="lbl">Welcome</div><h1 class="mt">Turn your Paper Pro into a drawing tablet</h1>
+        <div class="lbl">Welcome</div><h1 class="mt">Turn your reMarkable into a drawing tablet</h1>
         <p class="lead">Your reMarkable becomes a pen tablet for Windows, with pressure, tilt and the eraser end, and it shows what you draw on its own screen. This guide takes about 15 minutes, once.</p>
         <div class="illus"><svg viewBox="0 0 300 140" fill="none" stroke-linecap="round" stroke-linejoin="round">
           <rect x="8" y="30" width="120" height="86" rx="7" style="stroke:var(--accent)" stroke-width="1.5"/><rect x="18" y="38" width="100" height="70" style="fill:var(--accent-d)"/>
@@ -785,8 +789,11 @@ const Wizard = {
           <path d="M136 73h40" style="stroke:var(--accent2)" stroke-width="1.5" stroke-dasharray="4 4"/>
           <rect x="184" y="20" width="108" height="72" rx="4" style="stroke:var(--accent2)" stroke-width="1.5"/><path d="M226 92v14M212 108h30" style="stroke:var(--accent2)" stroke-width="1.5"/>
           <path d="M200 68c14-26 24-26 32-10s18 16 32-14" style="stroke:var(--accent2)" stroke-width="2"/></svg></div>
+        <div class="pane-title mt">Which tablet?</div>
+        <div class="seg mt" id="wzModel">${this.MODELS.map(([k, n]) => `<button data-v="${k}" class="${(S_.cfg.model || "ferrari") === k ? "on" : ""}">${n}</button>`).join("")}</div>
+        ${this.devMode() ? "" : `<p class="hint mt">Support for the ${this.MODELS.find(m => m[0] === S_.cfg.model)[1]} is new and not yet tested on one. If something is off, the pen's direction or the tablet screen, please report it.</p>`}
         <div class="pane-title mt">You'll need</div>
-        <ol class="steps"><li><div>The tablet, charged, and its USB-C cable</div></li><li><div>Your reMarkable account, for the backup</div></li><li><div>About 15 minutes</div></li></ol>`;
+        <ol class="steps"><li><div>The tablet, charged, and its USB cable</div></li>${this.devMode() ? "<li><div>Your reMarkable account, for the backup</div></li>" : ""}<li><div>About ${this.devMode() ? 15 : 5} minutes</div></li></ol>`;
       case 1: return `
         <div class="lbl">Step 1 · Back up</div><h1 class="mt">Make sure your notebooks are in the cloud</h1>
         <p class="lead">Turning on developer mode resets the tablet and <b>erases everything on it</b>. Your notebooks come back from the reMarkable cloud when you sign in again.</p>
@@ -812,7 +819,7 @@ const Wizard = {
         <p class="lead">Plug the tablet into this computer with the USB-C cable and unlock it. This page checks for it by itself.</p>
         <div class="live">
           <div class="row ${S_.link ? "ok" : ""}"><span class="dot ${S_.link ? "ok" : "busy"}"></span><div>${S_.link ? "Tablet found on the cable" : "Looking for the tablet…"}</div></div>
-          <div class="row ${S_.ssh ? "ok" : ""}"><span class="dot ${S_.ssh ? "ok" : S_.link ? "warn" : ""}"></span><div>${S_.ssh ? "Developer mode is answering" : S_.link ? "The tablet is there, but developer mode isn't answering yet" : "Waiting for the tablet"}</div></div>
+          <div class="row ${S_.ssh ? "ok" : ""}"><span class="dot ${S_.ssh ? "ok" : S_.link ? "warn" : ""}"></span><div>${S_.ssh ? "The tablet is answering" : S_.link ? (this.devMode() ? "The tablet is there, but developer mode isn't answering yet" : "The tablet is there, but isn't answering yet") : "Waiting for the tablet"}</div></div>
         </div>
         <div class="pane-title mt2">Not working?</div>
         <ol class="steps">
@@ -850,6 +857,7 @@ const Wizard = {
   },
 
   wire() {
+    for (const x of $$("#wzModel button")) x.onclick = async () => { await setKey("model", x.dataset.v); this._rendered = null; this.render(); };
     const b = $("#wzBackup"); if (b) b.onchange = () => { this.backedUp = b.checked; this.render(); };
     const d = $("#wzDev"); if (d) d.onchange = () => { this.devOn = d.checked; this.render(); };
     const p = $("#wzPair");
@@ -881,9 +889,16 @@ $("#wzNext").onclick = () => {
     go("home");
     return;
   }
-  Wizard.step++; Wizard.render();
+  Wizard.step++;
+  if (!Wizard.devMode() && (Wizard.step === 1 || Wizard.step === 2)) Wizard.step = 3;  // no reset, nothing to back up
+  Wizard.render();
 };
-$("#wzBack").onclick = () => { if (Wizard.step) { Wizard.step--; Wizard.render(); } };
+$("#wzBack").onclick = () => {
+  if (!Wizard.step) return;
+  Wizard.step--;
+  if (!Wizard.devMode() && (Wizard.step === 1 || Wizard.step === 2)) Wizard.step = 0;
+  Wizard.render();
+};
 $("#wzSkip").onclick = () => Wizard.close();
 
 // ------------------------------------------------------------------ panel buttons editor

@@ -77,6 +77,7 @@ def bare_engine(cfg=None):
     """An Engine without its constructor (no config file, monitors or threads)."""
     e = object.__new__(core.Engine)
     e.cfg = dict(core.DEFAULTS, **(cfg or {}))
+    e.model = core.devices.DEFAULT
     e.sent = []
     e.keys = keys.Keys(send=lambda vk, up, ext=False: e.sent.append((vk, up)))
     moves = e.moves = []
