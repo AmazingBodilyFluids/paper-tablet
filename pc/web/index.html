@@ -91,11 +91,11 @@
         <div class="pane">
             <div class="pane-title">When you plug in</div>
             <div class="opt"><div class="tx"><div class="t1">Connect automatically</div></div>
-              <span class="switch"><input type="checkbox" data-key="auto_connect"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="auto_connect"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Turn on the pen</div></div>
-              <span class="switch"><input type="checkbox" data-key="auto_output"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="auto_output"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Show the tablet screen</div></div>
-              <span class="switch"><input type="checkbox" data-key="auto_screen"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="auto_screen"><span class="track"></span></label></div>
             <p class="hint mt">With these on, plugging in is all it takes. Unplug and the tablet goes straight back to your notebooks.</p>
         </div>
       </div>
@@ -159,7 +159,7 @@
             </div>
             <p class="hint mt" id="fitHint"></p>
             <div class="opt mts"><div class="tx"><div class="t1">Lift the pen at the edge</div><div class="t2">A stroke that runs off the area stops instead of drawing along the screen edge</div></div>
-              <span class="switch"><input type="checkbox" data-key="edge_lift"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="edge_lift"><span class="track"></span></label></div>
           </div>
           <div class="pane">
             <div class="pane-title">Active area</div>
@@ -205,14 +205,14 @@
           <div class="pane">
             <div class="pane-title">Options</div>
             <div class="opt"><div class="tx"><div class="t1">Send pen tilt</div><div class="t2">For brushes that respond to angle</div></div>
-              <span class="switch"><input type="checkbox" data-key="tilt"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="tilt"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Windows pen feedback</div><div class="t2">Ripples and cursor effects Windows draws</div></div>
               <select class="input" data-key="feedback" style="width:150px"><option value="indirect">Cursor only</option><option value="default">Windows default</option><option value="none">None</option></select></div>
           </div>
           <div class="pane">
             <div class="pane-title">Shapes</div>
             <div class="opt"><div class="tx"><div class="t1">Hold to snap</div><div class="t2">Draw a line, circle, rectangle or triangle and keep the pen still: it becomes a clean shape</div></div>
-              <span class="switch"><input type="checkbox" data-key="snap"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="snap"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Hold for</div></div>
               <div class="seg" data-key="snap_hold_ms"><button data-v="400">0.4 s</button><button data-v="600">0.6 s</button><button data-v="900">0.9 s</button></div></div>
             <div class="field mt"><span class="lbl">Only in these apps (program names, comma separated)</span><input class="input mono" data-key="snap_apps"></div>
@@ -231,7 +231,7 @@
         <div class="pane">
           <div class="pane-title">Display</div>
           <div class="opt"><div class="tx"><div class="t1">Tablet screen</div><div class="t2" id="scrState"></div></div>
-            <span class="switch"><input type="checkbox" id="swScreen2"><span class="track"></span></span></div>
+            <label class="switch"><input type="checkbox" id="swScreen2"><span class="track"></span></label></div>
           <div class="opt"><div class="tx"><div class="t1">Rotation</div><div class="t2">Match calibration follows how the tablet sits</div></div>
             <select class="input" data-key="companion_rot" id="rotSel" style="width:220px"></select></div>
           <div class="opt" style="display:block"><div class="range-row"><span>Trail stays for</span><input type="range" min="250" max="5250" step="250" id="trailR"><span class="v" id="trailV"></span></div>
@@ -239,7 +239,7 @@
           <div class="opt"><div class="tx"><div class="t1">Shortcut panel</div><div class="t2">16 buttons you choose yourself. Tap with a finger or the pen. <a onclick="go('panel')">Customise the buttons</a></div></div>
             <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
           <div class="opt"><div class="tx"><div class="t1">Finger gestures</div><div class="t2">Three fingers swipe left: undo, right: redo. Two fingers drag to pan, pinch to zoom.</div></div>
-            <span class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></span></div>
+            <label class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></label></div>
           <p class="hint mts">Fingers are ignored while the pen is near the screen, so a resting hand does nothing. <span id="lastAction"></span></p>
           <div class="row mt"><button class="btn" onclick="api().clear_ink()">Clear the tablet screen</button></div>
         </div>
@@ -256,13 +256,13 @@
             <div class="row"><button class="btn" onclick="pickTrace()">Choose…</button><button class="btn ghost" id="traceDel" onclick="setKey('trace_file','').then(refresh)">Remove</button></div></div>
           <div class="opt" style="display:block"><div class="range-row"><span>Image strength</span><input type="range" min="0.1" max="1" step="0.05" data-key="trace_opacity" data-type="float"><span class="v" id="traceV"></span></div></div>
           <div class="opt"><div class="tx"><div class="t1">Move and zoom it on the tablet</div><div class="t2">While on, one finger drags the image and two fingers zoom it; gestures pause. It turns on by itself when you choose an image; tap the black note on the tablet to finish. A panel button can do this too ("Move image").</div></div>
-            <div class="row"><button class="btn ghost" onclick="resetTrace()">Centre</button><span class="switch"><input type="checkbox" data-key="trace_adjust"><span class="track"></span></span></div></div>
+            <div class="row"><button class="btn ghost" onclick="resetTrace()">Centre</button><label class="switch"><input type="checkbox" data-key="trace_adjust"><span class="track"></span></label></div></div>
           <div class="opt"><div class="tx"><div class="t1">Trace mask</div><div class="t2">Shaded parts of the tablet screen ignore the pen, like a stencil, so you can only draw inside the shape you leave open. <span id="maskInfo"></span></div></div>
-            <span class="switch"><input type="checkbox" data-key="mask_on"><span class="track"></span></span></div>
+            <label class="switch"><input type="checkbox" data-key="mask_on"><span class="track"></span></label></div>
           <div class="opt"><div class="tx"><div class="t1">Paint the mask on the tablet</div><div class="t2">While on, the pen paints the shading, the eraser end clears it, and one finger drags the whole mask. Windows gets no pen meanwhile.</div></div>
-            <div class="row"><button class="btn ghost" onclick="maskOp('invert')">Invert</button><button class="btn ghost" onclick="maskOp('clear')">Clear</button><span class="switch"><input type="checkbox" data-key="mask_edit"><span class="track"></span></span></div></div>
+            <div class="row"><button class="btn ghost" onclick="maskOp('invert')">Invert</button><button class="btn ghost" onclick="maskOp('clear')">Clear</button><label class="switch"><input type="checkbox" data-key="mask_edit"><span class="track"></span></label></div></div>
           <div class="opt"><div class="tx"><div class="t1">Front light to full</div><div class="t2">Lights the screen evenly for tracing. It's a front light, so it lights the image on screen rather than shining through paper laid on top. Your light level comes back when the tablet screen turns off.</div></div>
-            <span class="switch"><input type="checkbox" data-key="light"><span class="track"></span></span></div>
+            <label class="switch"><input type="checkbox" data-key="light"><span class="track"></span></label></div>
         </div>
         <div class="pane">
           <div class="pane-title">Tablet log</div>
@@ -324,9 +324,9 @@
             <div class="opt"><div class="tx"><div class="t1">Side</div></div>
               <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
             <div class="opt"><div class="tx"><div class="t1">Unfolded</div><div class="t2">The tab in the top corner folds it away for more drawing room</div></div>
-              <span class="switch"><input type="checkbox" data-key="panel_open"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="panel_open"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Finger gestures</div><div class="t2">3 fingers swipe: undo / redo. 2 fingers: pan, pinch zoom</div></div>
-              <span class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></span></div>
+              <label class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Fingers in this profile</div><div class="t2"><b>Shortcuts</b> turn gestures into keys for your drawing app. <b>Windows touch</b> makes the tablet a touchscreen: apps scroll with inertia, pinch and rotate by themselves. The pen still mutes fingers while it's near.</div></div>
               <div class="seg" id="profTouch"><button data-v="shortcuts">Shortcuts</button><button data-v="windows">Windows touch</button></div></div>
             <div class="opt"><div class="tx"><div class="t1">Rotate key</div><div class="t2">Five fingers twisted rotate the canvas: this key is held while the app drags round the window centre. Photoshop: <code>r</code>, Krita / Clip Studio: <code>shift+space</code></div></div>
@@ -359,9 +359,9 @@
         <div class="pane">
           <div class="pane-title">Behaviour</div>
           <div class="opt"><div class="tx"><div class="t1">Keep the notebook from reacting to the pen</div><div class="t2">Only matters when the tablet screen is off. Taps then go to Windows only.</div></div>
-            <span class="switch"><input type="checkbox" data-key="grab"><span class="track"></span></span></div>
+            <label class="switch"><input type="checkbox" data-key="grab"><span class="track"></span></label></div>
           <div class="opt"><div class="tx"><div class="t1">Keep running in the tray when the window is closed</div><div class="t2">The pen keeps working. Open or exit Paper Tablet from its tray icon.</div></div>
-            <span class="switch"><input type="checkbox" data-key="close_to_tray"><span class="track"></span></span></div>
+            <label class="switch"><input type="checkbox" data-key="close_to_tray"><span class="track"></span></label></div>
           <div class="opt"><div class="tx"><div class="t1">Setup guide</div><div class="t2">Walk through developer mode and the cable again</div></div>
             <button class="btn" onclick="Wizard.open()">Open</button></div>
           <div class="opt"><div class="tx"><div class="t1">About</div><div class="t2">Paper Tablet <span id="appVersion"></span>, for reMarkable Paper Pro. Not affiliated with reMarkable AS. Fonts: IBM Plex (SIL OFL).</div></div></div>
