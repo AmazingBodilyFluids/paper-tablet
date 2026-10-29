@@ -211,6 +211,7 @@ class Mapper:
     homography: tuple = None  # point calibration: normalized raw (x, y) -> (u, v)
     correction: dict = None  # 9-point residual mesh on top of the homography
     aspect: float = None  # measured width/height of the calibrated frame
+    edge_lift: bool = True  # a stroke that leaves the mapped area lifts instead of running along the screen edge
 
     def _norm(self, axis, value):
         a = self.absinfo[axis]
@@ -281,18 +282,27 @@ class Mapper:
         c, h = (ay0 + ay1) / 2, (ay1 - ay0)
         return ax0, c - half * h, ax1, c + half * h
 
-    def to_screen(self, x, y):
+    def _pq(self, x, y):
+        """Position on the monitor as fractions, before clamping (outside 0..1 = off the mapped area)."""
         p, q = self.oriented(*self.uv(x, y))
         ax0, ay0, ax1, ay1 = self.area
         p = (p - ax0) / (ax1 - ax0)
         q = (q - ay0) / (ay1 - ay0)
-        l, t, r, b = self.monitor
-        mw, mh = r - l, b - t
         axis, scale = self._fit_scale()
         if axis == 0:
             p = (p - 0.5) * scale + 0.5
         else:
             q = (q - 0.5) * scale + 0.5
+        return p, q
+
+    def inside(self, x, y):
+        p, q = self._pq(x, y)
+        return 0.0 <= p <= 1.0 and 0.0 <= q <= 1.0
+
+    def to_screen(self, x, y):
+        p, q = self._pq(x, y)
+        l, t, r, b = self.monitor
+        mw, mh = r - l, b - t
         p = min(1.0, max(0.0, p))
         q = min(1.0, max(0.0, q))
         return int(round(l + p * (mw - 1))), int(round(t + q * (mh - 1)))
@@ -510,6 +520,8 @@ class PenTranslator:
             p = self.prev
         touching = (s.in_range and (s.touch or not self.has_touch_key)
                     and self.m.pressure(s.pressure) > 0)
+        if touching and self.m.edge_lift and not self.m.inside(s.x, s.y):
+            touching = False  # off the mapped area: hover at the edge rather than draw along it
         was_touching = p.in_range and p.touch
         if not s.in_range:
             if p.in_range:

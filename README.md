@@ -23,7 +23,7 @@ handle undo, redo, pan and zoom.
 - **Calibration** with 9, 4 or 0 targets. It learns exactly where the pen lands and which way round the
   tablet sits on your desk.
 - **Screen area.** Pick a display, choose fill / whole tablet / stretch, and drag out the part of the tablet
-  you want to use.
+  you want to use. A stroke that runs off that part lifts, instead of drawing along the screen edge.
 - **Pen feel.** A pressure curve, a light-touch threshold, a full-range check, and tilt on or off.
 - **Hold to snap.** Draw a line, circle, ellipse, triangle, rectangle or polygon, then hold the pen still and
   it becomes a clean shape, as in the tablet's own notebooks.
@@ -35,7 +35,8 @@ handle undo, redo, pan and zoom.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.
   - Tap gestures you can assign (one-finger triple tap = new layer by default).
 
-  Fingers are ignored while the pen is near the screen, so a resting hand does nothing.
+  Fingers are ignored while the pen is near the screen, and palm-sized contacts are ignored always, so a
+  resting hand does nothing.
 
 | | |
 |---|---|

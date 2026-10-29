@@ -32,7 +32,7 @@ TARGET_NAMES = ["top-left", "top-middle", "top-right", "middle-left", "centre", 
              "bottom-left", "bottom-middle", "bottom-right"]
 CORNER_NAMES = ["top-left", "top-right", "bottom-right", "bottom-left"]
 DEFAULTS = {
-    "host": "10.11.99.1", "user": "root", "key": "", "monitor": 0, "fit": "crop",
+    "host": "10.11.99.1", "user": "root", "key": "", "monitor": 0, "fit": "crop", "edge_lift": True,
     "orientation": "as-calibrated", "area": [0.0, 0.0, 1.0, 1.0], "gamma": 1.0, "threshold": 0.0,
     "tilt": True, "grab": False, "feedback": "indirect", "companion_rot": "Match calibration",
     # plug-and-play
@@ -44,6 +44,7 @@ DEFAULTS = {
     "snap": True, "snap_hold_ms": 600, "snap_apps": ", ".join(shapes.DRAWING_APPS),
     # tablet-screen side panel with shortcut buttons: left | right | off
     "panel": "left", "panel_open": True, "gestures": True,
+    "palm_size": 28,  # touch contacts bigger than this are a palm (measured: fingertip 12-21, palm 25-63); 0 = off
     "panel_buttons": None,  # filled from DEFAULT_BUTTONS below
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
@@ -574,7 +575,7 @@ class Engine:
         if key in ("companion_rot", "panel", "panel_open"):
             self.refresh_mapper()
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
-                   "panel_buttons", "gestures", "swipe_step"):
+                   "panel_buttons", "gestures", "swipe_step", "palm_size"):
             self.sync_companion()
         if key == "tilt" and self.worker and self.worker.translator and self.pen:
             self.worker.translator.has_tilt = bool(val) and "TILT_X" in self.pen["abs"]
@@ -784,7 +785,7 @@ class Engine:
                          swap=cal.get("swap", False), flip_u=cal.get("flip_u", False), flip_v=cal.get("flip_v", False),
                          homography=cal.get("homography"), correction=cal.get("correction"), aspect=cal.get("aspect"),
                          pressure_gamma=float(self.cfg["gamma"]), pressure_threshold=float(self.cfg["threshold"]),
-                         area=tuple(self.effective_area()))
+                         area=tuple(self.effective_area()), edge_lift=bool(self.cfg["edge_lift"]))
 
     def refresh_mapper(self):
         absinfo = (self.pen or {}).get("abs") or {"X": {"min": 0, "max": 11180}, "Y": {"min": 0, "max": 15340},
@@ -981,7 +982,8 @@ class Engine:
         shown = self.panel_shown()
         c.send(f"panel {self.cfg.get('panel', 'left') if shown else 'off'} {PANEL_PX / self.view_size()[0]:.4f}")
         c.send(f"panelopen {int(bool(self.cfg.get('panel_open', True)))}")
-        c.send(f"gestures {int(bool(self.cfg.get('gestures', True)))} {int(self.cfg.get('swipe_step', 100))}")
+        c.send(f"gestures {int(bool(self.cfg.get('gestures', True)))} {int(self.cfg.get('swipe_step', 100))} "
+                   f"{float(self.cfg.get('palm_size', 0))}")
         c.send("buttons " + json.dumps(self.companion_buttons(), separators=(",", ":")))
         c.send("area " + " ".join(f"{a:.4f}" for a in self.effective_area()))
         c.send(f"fade {int(self.cfg['trail_ms'])}")

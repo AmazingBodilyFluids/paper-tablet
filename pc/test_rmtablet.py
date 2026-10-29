@@ -188,6 +188,26 @@ class Mapping(unittest.TestCase):
         # centre maps to centre
         self.assertEqual(m.to_screen(5590, 7670), (960, 540))
 
+    def test_edge_lift(self):
+        # portrait tablet on a 16:9 monitor, crop: only a middle band of the tablet's height is mapped
+        S = rt.PenState
+        stroke = [S(x=5590, y=7670, pen=True, touch=True, pressure=2000),   # middle: inside
+                  S(x=5590, y=300, pen=True, touch=True, pressure=2000),    # top: off the band
+                  S(x=5590, y=200, pen=True, touch=True, pressure=2000),
+                  S(x=5590, y=7000, pen=True, touch=True, pressure=2000)]   # back in
+        m = mapper(fit="crop")
+        self.assertTrue(m.inside(5590, 7670))
+        self.assertFalse(m.inside(5590, 300))
+        tr = rt.PenTranslator(m, has_tilt=False)
+        kinds = [tuple(sorted(f.flags)) for s in stroke for f in tr.step(s)]
+        self.assertEqual(kinds, [("DOWN", "INCONTACT", "INRANGE"), ("INRANGE", "UP"),
+                                 ("INRANGE", "UPDATE"), ("DOWN", "INCONTACT", "INRANGE")])
+        m = mapper(fit="crop", edge_lift=False)  # old behaviour: keeps drawing, pinned to the edge
+        tr = rt.PenTranslator(m, has_tilt=False)
+        frames = [f for s in stroke for f in tr.step(s)]
+        self.assertTrue(all("INCONTACT" in f.flags for f in frames))
+        self.assertEqual(frames[1].y, 0)
+
     def test_letterbox_shrinks(self):
         m = mapper(orientation="landscape-cw", fit="letterbox")
         x, y = m.to_screen(0, 15340)

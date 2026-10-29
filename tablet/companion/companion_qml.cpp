@@ -83,7 +83,11 @@ Window {
         else if (c === "snap") snap(a)
         else if (c === "panel") { panelSide = a[0]; if (a.length > 1) panelFrac = parseFloat(a[1]) }
         else if (c === "panelopen") panelOpen = a[0] === "1"
-        else if (c === "gestures") { gesturesOn = a[0] === "1"; if (a.length > 1) swipeStep = parseFloat(a[1]) }
+        else if (c === "gestures") {
+            gesturesOn = a[0] === "1"
+            if (a.length > 1) swipeStep = parseFloat(a[1])
+            if (a.length > 2) palmSize = parseFloat(a[2])
+        }
         else if (c === "toast") say(a.join(" "))
         else if (c === "state") {
             for (var i = 0; i + 1 < a.length; i += 2) {
@@ -233,6 +237,9 @@ Window {
     property var gC0: null         // centroid when the current finger count began
     property var gSent: null       // last pan offset sent
     property var touchBtn: ({})    // pointId -> panel item, for fingers that landed on the panel
+    property real palmSize: 0      // contact size (panel units) above which a touch is a palm; 0 = off
+    property var palms: ({})       // pointId -> true: contacts judged to be a palm, ignored until lifted
+    property real gLastEv: 0       // last touch event of any kind, for the stuck-contact sweep
     property real swipeStep: 100   // three-finger swipe: px of drag per undo / redo step
     property int gSteps: 0         // net steps sent this swipe: < 0 undos, > 0 redos
     // taps: a touch (all fingers down and up again) that is short and barely moves
@@ -280,6 +287,30 @@ Window {
         if (tapTimer.running && tapN === gMax) tapK++
         else { tapN = gMax; tapK = 1 }
         tapTimer.restart()
+    }
+    // Contact size as Qt reports it (the panel's ABS_MT_TOUCH_MAJOR); 0 if the platform gives none.
+    function touchSize(t) {
+        var d = t.ellipseDiameters
+        return d ? Math.max(d.width, d.height) : 0
+    }
+    // A palm: drop the contact and end whatever gesture it was part of. Sticky until it lifts,
+    // because a palm often lands small at its edge and grows.
+    function palmCheck(t) {
+        if (palmSize <= 0 || touchSize(t) <= palmSize || palms[t.pointId]) return false
+        var pl = palms; pl[t.pointId] = true; palms = pl
+        console.warn("LOG:palm " + Math.round(touchSize(t)))
+        if (t.pointId in gPts) { var g = gPts; delete g[t.pointId]; gPts = g }
+        endGesture()
+        return true
+    }
+    // A contact whose release got lost would block gestures for good: after 3 s with no touch
+    // events at all, forget every contact.
+    Timer {
+        interval: 1000; repeat: true; running: Object.keys(win.gPts).length > 0
+        onTriggered: if (Date.now() - win.gLastEv > 3000) {
+            console.warn("LOG:touch sweep " + Object.keys(win.gPts).length)
+            win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged()
+        }
     }
     Timer { id: tapTimer; interval: 330; onTriggered: { if (win.tapK > 0) win.act("tap " + win.tapN + " " + win.tapK); win.tapK = 0 } }
     function fingersChanged() {
@@ -480,13 +511,15 @@ Window {
             maximumTouchPoints: 10
             onPressed: (pts) => {
                 var changed = false
+                win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i], p = Qt.point(t.x, t.y)
-                    console.warn("LOG:touch " + Math.round(t.x) + "," + Math.round(t.y))
+                    console.warn("LOG:touch " + Math.round(t.x) + "," + Math.round(t.y) + " size " + Math.round(win.touchSize(t)))
                     if (win.inPanel(p)) {  // the panel answers even with the pen hovering: the other hand taps it
                         var tb = win.touchBtn; tb[t.pointId] = win.pressAt(p); win.touchBtn = tb
                         continue
                     }
+                    if (win.palmCheck(t)) { changed = true; continue }
                     var g = win.gPts; g[t.pointId] = {x: t.x, y: t.y}; win.gPts = g
                     var st = win.gStart; st[t.pointId] = {x: t.x, y: t.y}; win.gStart = st
                     changed = true
@@ -494,17 +527,26 @@ Window {
                 if (changed) win.fingersChanged()
             }
             onUpdated: (pts) => {
-                var g = win.gPts, moved = false
+                var g = win.gPts, moved = false, palm = false
+                win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i]
+                    if (g[t.pointId] && win.palmCheck(t)) { palm = true; continue }
                     if (g[t.pointId]) { g[t.pointId] = {x: t.x, y: t.y}; moved = true }
                 }
+                if (palm) { win.fingersChanged(); return }
                 if (moved) { win.gPts = g; win.fingersMoved() }
             }
             onReleased: (pts) => {
                 var g = win.gPts, changed = false
+                win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i]
+                    if (win.palms[t.pointId]) {
+                        var pl = win.palms; delete pl[t.pointId]; win.palms = pl
+                        if (Object.keys(g).length === 0) changed = true
+                        continue
+                    }
                     if (t.pointId in win.touchBtn) {
                         var tb = win.touchBtn
                         if (tb[t.pointId] >= 0) win.releaseBtn(tb[t.pointId], false)
@@ -518,7 +560,7 @@ Window {
                 }
                 if (changed) { win.gPts = g; win.fingersChanged() }
             }
-            onCanceled: (pts) => { win.endGesture(); win.gPts = ({}); win.fingersChanged(); win.pressing = -1 }
+            onCanceled: (pts) => { win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged(); win.pressing = -1 }
         }
 
         Repeater {  // 9 calibration crosshairs, reading order, 10% inset (matches the PDF sheet)
