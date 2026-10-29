@@ -32,7 +32,7 @@ restore() {
     fi
     { echo rmpp-companion > /sys/power/wake_unlock; } 2>/dev/null
     [ -s "$LOCK/light" ] && cat "$LOCK/light" > "$FL/brightness" 2>/dev/null
-    rm -f "$DIR"/trace.*
+    rm -f "$DIR"/trace.* "$DIR"/mask*.png "$DIR"/thumb*.png
     rm -rf "$LOCK"
     echo "companion: screen returned to xochitl"
 }
