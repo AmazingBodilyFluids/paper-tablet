@@ -29,7 +29,8 @@ handle undo, redo, pan and zoom.
   it becomes a clean shape, as in the tablet's own notebooks.
 - **Shortcut panel on the tablet.** 16 buttons you design yourself in the desktop app: any title and any key
   combination. A button can tap its keys or hold them (for Space-to-pan, Alt-to-pick and the like).
-  The panel folds away from its corner tab when you want the whole surface.
+  The panel folds away from its corner tab when you want the whole surface. Keep as many named button sets
+  (profiles) as you like, for example one per app, and switch with the arrows at the top of the panel.
 - **Finger gestures:**
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.

@@ -766,7 +766,8 @@ const Panel = {
     const saved = JSON.stringify(S.cfg.panel_buttons);
     if (!this.btns || (!this.dirty && saved !== JSON.stringify(this.btns))) this.btns = JSON.parse(saved);
     if (view !== "panel") return;
-    const sig = JSON.stringify([this.btns, this.sel, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap]);
+    this.renderProfiles();
+    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap]);
     if (sig !== this.sig) { this.sig = sig; this.draw(); }
     if (!this.recording && document.activeElement !== $("#peName") && document.activeElement !== $("#peKeys")) this.fill();
     this.renderTaps();
@@ -813,6 +814,75 @@ const Panel = {
     setKey("taps", S.taps).then(refresh);
   },
 
+  // ---- profiles: named button sets, cycled with the arrows on the tablet
+  profRow(px, W, T) {
+    const profs = S.cfg.panel_profiles || [], many = profs.length > 1;
+    const name = (profs[S.cfg.panel_profile] || {}).name || "";
+    const tri = (left, flip) => `<svg viewBox="0 0 22 30" style="${left ? "left" : "right"}:${px(16)};width:${px(22)};height:${px(30)}">
+      <path d="${flip ? "M22 0L0 15L22 30Z" : "M0 0L22 15L0 30Z"}" fill="#000"/></svg>`;
+    return `<div class="pm-prof" title="Tap the arrows on the tablet to switch profile"
+      style="left:${px(16)};top:${px(T + 10)};width:${px(W - 32)};height:${px(72)};border-radius:${px(14)};border-width:${px(3)};
+      font-size:${px(26)};padding:0 ${px(many ? 56 : 12)}">${many ? tri(true, true) : ""}<span>${esc(name)}</span>${many ? tri(false, false) : ""}</div>`;
+  },
+  renderProfiles() {
+    const profs = S.cfg.panel_profiles || [], cur = S.cfg.panel_profile || 0;
+    const sel = $("#profSel"), sig = JSON.stringify([profs.map(p => p.name), cur]);
+    if (sel.dataset.sig !== sig && document.activeElement !== sel) {
+      sel.dataset.sig = sig;
+      sel.innerHTML = profs.map((p, i) => `<option value="${i}"${i === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+    }
+    if (document.activeElement !== $("#profName")) $("#profName").value = (profs[cur] || {}).name || "";
+    $("#profDel").disabled = profs.length < 2;
+  },
+  async flush() {  // a pending button edit belongs to the profile it was made in
+    if (!this.t) return;
+    clearTimeout(this.t); this.t = null;
+    if (this.dirty) { await setKey("panel_buttons", this.btns); this.dirty = false; }
+  },
+  async setProfiles(profs, cur) {
+    await this.flush();
+    await setKey("panel_profiles", profs);
+    if (cur !== undefined) await setKey("panel_profile", cur);
+    this.btns = null; this.sel = 0;
+    await refresh();
+  },
+  async switchProfile(i) {
+    await this.flush();
+    await setKey("panel_profile", i);
+    this.btns = null; this.sel = 0;
+    await refresh();
+  },
+  initProfiles() {
+    const copy = o => JSON.parse(JSON.stringify(o));
+    const profs = () => copy(S.cfg.panel_profiles || []);
+    $("#profSel").onchange = e => this.switchProfile(+e.target.value);
+    $("#profName").onchange = e => {
+      const p = profs(), name = e.target.value.trim();
+      if (!name) { e.target.value = p[S.cfg.panel_profile].name; return; }
+      p[S.cfg.panel_profile].name = name;
+      this.setProfiles(p);
+    };
+    const add = (name, buttons) => {
+      const p = profs();
+      p.push({ name, buttons: copy(buttons) });
+      this.setProfiles(p, p.length - 1).then(() => { $("#profName").focus(); $("#profName").select(); });
+    };
+    $("#profNew").onclick = async () => { await this.flush(); add(`Profile ${S.cfg.panel_profiles.length + 1}`, S.default_buttons); };
+    $("#profDup").onclick = async () => {
+      await this.flush();
+      add(S.cfg.panel_profiles[S.cfg.panel_profile].name + " copy", this.btns || S.cfg.panel_buttons);
+    };
+    let armed = 0;
+    $("#profDel").onclick = () => {  // two clicks, so a stray one can't lose a layout
+      const b = $("#profDel");
+      if (Date.now() - armed > 3000) { armed = Date.now(); b.textContent = "Sure?"; setTimeout(() => b.textContent = "Delete", 3000); return; }
+      armed = 0; b.textContent = "Delete";
+      const p = profs(), cur = S.cfg.panel_profile;
+      const gone = p.splice(cur, 1)[0];
+      this.setProfiles(p, Math.max(0, cur - 1)).then(() => toast(`Deleted "${gone.name}".`));
+    };
+  },
+
   draw() {
     const wrap = $("#pmWrap"), [vw, vh] = S.view, right = S.cfg.panel === "right";
     const W = S.panel_px, T = S.tab_px, k = Math.min(640 / vh, 380 / (W + 260));
@@ -835,7 +905,8 @@ const Panel = {
     const panel = `<div class="pm-panel" style="width:${px(W)};height:${px(vh)};${right ? "right:0" : "left:0"}">
         <div class="pm-edge" style="${right ? "left:0" : "right:0"};width:${px(3)}"></div>
         <div class="pm-head" style="left:${px(right ? 22 : T + 14)};top:${px(24)};font-size:${px(22)};letter-spacing:${px(4)}">PAPER<br>TABLET</div>
-        <div class="pm-status" style="left:${px(22)};top:${px(T + 22)};width:${px(W - 44)};font-size:${px(21)}">Pen on · Photoshop</div>
+        ${this.profRow(px, W, T)}
+        <div class="pm-status" style="left:${px(22)};top:${px(T + 10 + 72 + 8)};width:${px(W - 44)};font-size:${px(21)}">Connected to PC. Pen on</div>
         ${cells}
         <div class="pm-foot" style="left:${px(22)};top:${px(vh - this.FOOT + 18)};width:${px(W - 44)};font-size:${px(19)}">${S.cfg.gestures ?
           "3 fingers swipe: left undo, right redo<br>2 fingers: pan, pinch to zoom<br>5 fingers: twist to rotate" : "Power button: back to notebooks"}</div>
@@ -983,6 +1054,7 @@ const Panel = {
     $("#peRecord").onclick = () => this.record(!this.recording);
     window.addEventListener("keydown", e => this.onKey(e), true);
     window.addEventListener("keyup", e => this.onKey(e), true);
+    this.initProfiles();
     $("#pmReset").onclick = () => {
       this.btns = JSON.parse(JSON.stringify(S.default_buttons));
       this.save();

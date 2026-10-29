@@ -43,6 +43,10 @@ Window {
     readonly property real panelW: panelOn && panelOpen ? panelFrac * view.width : 0
     readonly property real panelX: panelSide === "right" ? view.width - panelW : 0
     readonly property real headH: 230
+    readonly property real profY: tabS + 10   // the profile row: arrows either side of its name
+    readonly property real profH: 72
+    property string profileName: ""
+    property int profileCount: 1
     readonly property real footH: 190
     readonly property int rows: 8
     readonly property real cellW: panelW / 2
@@ -83,6 +87,7 @@ Window {
         else if (c === "snap") snap(a)
         else if (c === "panel") { panelSide = a[0]; if (a.length > 1) panelFrac = parseFloat(a[1]) }
         else if (c === "panelopen") panelOpen = a[0] === "1"
+        else if (c === "profile") { profileCount = parseInt(a[1]); profileName = a.slice(2).join(" ") }
         else if (c === "gestures") {
             gesturesOn = a[0] === "1"
             if (a.length > 1) swipeStep = parseFloat(a[1])
@@ -136,6 +141,12 @@ Window {
         if (!panelOpen) return tabHit(p)
         return p.x >= panelX && p.x < panelX + panelW
     }
+    // -1 / +1 on the profile arrows (only with more than one profile), 0 elsewhere
+    function profileArrow(p) {
+        if (!panelOpen || profileCount < 2 || !inPanel(p) || p.y < profY || p.y >= profY + profH) return 0
+        var x = p.x - panelX
+        return x < panelW * 0.3 ? -1 : x >= panelW * 0.7 ? 1 : 0
+    }
     function buttonAt(p) {
         if (!panelOpen || !inPanel(p) || p.y < headH || p.y >= view.height - footH) return -1
         var i = Math.floor((p.y - headH) / cellH) * 2 + (p.x - panelX >= cellW ? 1 : 0)
@@ -154,6 +165,8 @@ Window {
     // Returns what was pressed: -2 for the fold tab, a button index, or -1.
     function pressAt(p) {
         if (tabHit(p)) { fold(); return -2 }
+        var arrow = profileArrow(p)
+        if (arrow) { latched = ({}); act("profile " + (arrow > 0 ? "next" : "prev")); return -3 }
         var i = buttonAt(p)
         pressBtn(i)
         return i
@@ -439,11 +452,33 @@ Window {
                 width: parent.width - win.tabS - 36; spacing: 8
                 Text { text: "PAPER\nTABLET"; font.pixelSize: 22; font.bold: true; font.letterSpacing: 4; color: "black"; lineHeight: 1.1 }
             }
-            Column {
-                x: 22; y: win.tabS + 22; width: parent.width - 44; spacing: 8
-                Text { text: win.status; width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 21; color: "black"; maximumLineCount: 2; elide: Text.ElideRight }
-                Text { text: win.toast; width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 24; font.bold: true; color: "black"; maximumLineCount: 2 }
+            Item {  // profile row: < name >
+                id: prof
+                x: 16; y: win.profY; width: parent.width - 32; height: win.profH
+                property bool many: win.profileCount > 1
+                Rectangle { anchors.fill: parent; radius: 14; border.width: 3; border.color: "black"; color: "white" }
+                Text {
+                    x: prof.many ? 56 : 12; width: parent.width - 2 * x; anchors.verticalCenter: parent.verticalCenter
+                    horizontalAlignment: Text.AlignHCenter; text: win.profileName; font.pixelSize: 26; font.bold: true
+                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 14; elide: Text.ElideRight; color: "black"
+                }
+                Repeater {
+                    model: prof.many ? 2 : 0
+                    Item {  // solid triangles from 2 px rows, like the fold tab
+                        x: index === 0 ? 16 : prof.width - 16 - 22; anchors.verticalCenter: parent.verticalCenter
+                        width: 22; height: 30; rotation: index === 0 ? 180 : 0
+                        Repeater {
+                            model: 15
+                            Rectangle {
+                                property real w: 22 * (1 - Math.abs(index - 7) / 7.5)
+                                y: index * 2; width: w; height: 2; color: "black"; antialiasing: false
+                            }
+                        }
+                    }
+                }
             }
+            Text { x: 22; y: win.profY + win.profH + 8; width: parent.width - 44; text: win.toast || win.status
+                   font.pixelSize: 21; font.bold: win.toast !== ""; color: "black"; elide: Text.ElideRight }
             Repeater {
                 model: win.buttons.length
                 Item {

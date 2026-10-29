@@ -45,7 +45,9 @@ DEFAULTS = {
     # tablet-screen side panel with shortcut buttons: left | right | off
     "panel": "left", "panel_open": True, "gestures": True,
     "palm_size": 28,  # touch contacts bigger than this are a palm (measured: fingertip 12-21, palm 25-63); 0 = off
-    "panel_buttons": None,  # filled from DEFAULT_BUTTONS below
+    "panel_buttons": None,  # filled from DEFAULT_BUTTONS below; always the active profile's buttons
+    # named button sets, cycled with the arrows on the tablet panel: [{"name", "buttons"}]
+    "panel_profiles": None, "panel_profile": 0,
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
     "taps": None,           # tap gestures, filled from DEFAULT_TAPS below
@@ -76,6 +78,23 @@ DEFAULT_TAPS = {"1x2": {"t": "", "keys": ""}, "1x3": {"t": "New layer", "keys": 
                 "2x1": {"t": "", "keys": ""}, "2x2": {"t": "", "keys": ""}, "3x1": {"t": "", "keys": ""}}
 DEFAULTS["taps"] = DEFAULT_TAPS
 BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "none")
+
+
+def clean_profiles(profiles, current=None):
+    """Validated profile list: at least one, each with a name and a full button layout."""
+    out = []
+    for i, p in enumerate(list(profiles or [])[:50]):
+        p = p if isinstance(p, dict) else {}
+        name = " ".join(str(p.get("name") or "").split())[:24] or f"Profile {i + 1}"
+        out.append({"name": name, "buttons": clean_buttons(p.get("buttons"))})
+    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS)}]
+
+
+def load_profiles(cfg):
+    """Settings from before profiles had one layout: it becomes the first profile."""
+    cfg["panel_profiles"] = clean_profiles(cfg.get("panel_profiles"), cfg.get("panel_buttons"))
+    cfg["panel_profile"] = max(0, min(int(cfg.get("panel_profile") or 0), len(cfg["panel_profiles"]) - 1))
+    cfg["panel_buttons"] = cfg["panel_profiles"][cfg["panel_profile"]]["buttons"]
 
 
 def clean_buttons(btns):
@@ -458,6 +477,7 @@ class Engine:
             self.cfg.setdefault("auto_connect", saved["gui"]["autoconnect"])
         if self.cfg.get("panel_buttons") == OLD_DEFAULT_BUTTONS:
             self.cfg["panel_buttons"] = DEFAULT_BUTTONS
+        load_profiles(self.cfg)
         self.calibration = saved.get("calibration")
         if self.calibration and not saved.get("gui", {}).get("onboarded"):
             self.cfg["onboarded"] = True  # an existing setup (calibrated before) needs no walkthrough
@@ -560,6 +580,17 @@ class Engine:
                 raise KeyError(key)
             if key == "panel_buttons":
                 val = clean_buttons(val)
+                profs = [dict(p) for p in self.cfg["panel_profiles"]]
+                profs[self.cfg["panel_profile"]]["buttons"] = val
+                self.cfg["panel_profiles"] = profs
+            if key == "panel_profiles":
+                val = clean_profiles(val, self.cfg.get("panel_buttons"))
+                self.cfg["panel_profile"] = min(self.cfg["panel_profile"], len(val) - 1)
+                self.cfg["panel_buttons"] = val[self.cfg["panel_profile"]]["buttons"]
+            if key == "panel_profile":
+                val = int(val) % len(self.cfg["panel_profiles"])
+                self.cfg["panel_buttons"] = self.cfg["panel_profiles"][val]["buttons"]
+                self.keys.release_all()  # a held key belongs to the old layout's buttons
             if key == "taps":
                 val = clean_taps(val)
             if key == "rotate_keys":
@@ -575,8 +606,11 @@ class Engine:
         if key in ("companion_rot", "panel", "panel_open"):
             self.refresh_mapper()
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
-                   "panel_buttons", "gestures", "swipe_step", "palm_size"):
+                   "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile"):
             self.sync_companion()
+        if key == "panel_profile" and self.companion.running:
+            self.companion.send("unlatch")
+            self.companion.send("toast " + self.cfg["panel_profiles"][self.cfg["panel_profile"]]["name"])
         if key == "tilt" and self.worker and self.worker.translator and self.pen:
             self.worker.translator.has_tilt = bool(val) and "TILT_X" in self.pen["abs"]
         self.changed()
@@ -681,6 +715,8 @@ class Engine:
             self.keys.combo(keys.SHORTCUTS[name])
         elif name == "panel":
             self.set("panel_open", arg == "1")
+        elif name == "profile" and arg in ("next", "prev"):
+            self.set("panel_profile", self.cfg["panel_profile"] + (1 if arg == "next" else -1))
         elif name == "pen":
             self.set_output(arg == "1")
         elif name == "snap":
@@ -985,6 +1021,8 @@ class Engine:
         c.send(f"gestures {int(bool(self.cfg.get('gestures', True)))} {int(self.cfg.get('swipe_step', 100))} "
                    f"{float(self.cfg.get('palm_size', 0))}")
         c.send("buttons " + json.dumps(self.companion_buttons(), separators=(",", ":")))
+        profs = self.cfg["panel_profiles"]
+        c.send(f"profile {self.cfg['panel_profile']} {len(profs)} {profs[self.cfg['panel_profile']]['name']}")
         c.send("area " + " ".join(f"{a:.4f}" for a in self.effective_area()))
         c.send(f"fade {int(self.cfg['trail_ms'])}")
         c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))}")

@@ -1,4 +1,5 @@
 """Panel buttons, key combinations and tablet actions (no Windows, no tablet needed)."""
+import threading
 import types
 import unittest
 
@@ -150,6 +151,58 @@ class TabletActions(unittest.TestCase):
         e.tablet_action("pen 1")
         e.tablet_action("snap 0")
         self.assertEqual(e.settings, [("panel_open", False), ("output", True), ("snap", False)])
+
+
+class Profiles(unittest.TestCase):
+    def engine(self, cfg=None):
+        e = bare_engine(cfg)
+        core.load_profiles(e.cfg)
+        e.set = core.Engine.set.__get__(e)
+        e.lock = threading.RLock()
+        e.refresh_mapper = e.save = e.sync_companion = lambda: None
+        e.worker = None
+        e.companion = types.SimpleNamespace(running=True, lines=[])
+        e.companion.send = e.companion.lines.append
+        return e
+
+    def test_old_layout_becomes_first_profile(self):
+        mine = core.clean_buttons([{"t": "Mine", "kind": "shortcut", "keys": "m"}])
+        e = self.engine({"panel_buttons": mine})
+        self.assertEqual(len(e.cfg["panel_profiles"]), 1)
+        self.assertEqual(e.cfg["panel_profiles"][0]["buttons"], mine)
+        self.assertEqual(e.buttons(), mine)
+
+    def test_cycle_switches_buttons_and_wraps(self):
+        a = core.clean_buttons([{"t": "A", "kind": "shortcut", "keys": "a"}])
+        b = core.clean_buttons([{"t": "B", "kind": "hold", "keys": "b"}])
+        e = self.engine({"panel_profiles": [{"name": "PS", "buttons": a}, {"name": "Krita", "buttons": b}]})
+        e.tablet_action("press 0")
+        self.assertEqual(e.sent[0], (0x41, False))  # A
+        e.keys.down("shift")
+        e.tablet_action("profile next")
+        self.assertEqual(e.cfg["panel_profile"], 1)
+        self.assertEqual(e.keys.held, set())  # held keys let go on a switch
+        self.assertIn("toast Krita", e.companion.lines)
+        e.tablet_action("press 0")
+        self.assertEqual(e.keys.held, {"b"})
+        e.tablet_action("profile next")
+        self.assertEqual(e.cfg["panel_profile"], 0)  # wraps round
+        e.tablet_action("profile prev")
+        self.assertEqual(e.cfg["panel_profile"], 1)
+
+    def test_editing_buttons_edits_the_active_profile(self):
+        e = self.engine({"panel_profiles": [{"name": "One"}, {"name": "Two"}], "panel_profile": 1})
+        e.set("panel_buttons", [{"t": "X", "kind": "shortcut", "keys": "x"}])
+        self.assertEqual(e.cfg["panel_profiles"][1]["buttons"][0]["t"], "X")
+        self.assertEqual(e.cfg["panel_profiles"][0]["buttons"], core.clean_buttons(None))
+
+    def test_deleting_profiles_keeps_a_valid_selection(self):
+        e = self.engine({"panel_profiles": [{"name": "One"}, {"name": "Two"}], "panel_profile": 1})
+        e.set("panel_profiles", [{"name": "  Only   one ", "buttons": []}])
+        self.assertEqual(e.cfg["panel_profile"], 0)
+        self.assertEqual(e.cfg["panel_profiles"][0]["name"], "Only one")
+        e.set("panel_profiles", [])
+        self.assertEqual(len(e.cfg["panel_profiles"]), 1)  # never none
 
 
 class PanelGeometry(unittest.TestCase):
