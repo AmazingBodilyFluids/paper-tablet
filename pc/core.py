@@ -44,7 +44,9 @@ DEFAULTS = {
     "snap": True, "snap_hold_ms": 600, "snap_apps": ", ".join(shapes.DRAWING_APPS),
     # tablet-screen side panel with shortcut buttons: left | right | off
     "panel": "left", "panel_open": True, "gestures": True,
-    "palm_size": 28,  # touch contacts bigger than this are a palm (measured: fingertip 12-21, palm 25-63); 0 = off
+    # touch contacts bigger than this are a palm; 0 = off. In Qt's units, about 0.75 x the panel's raw
+    # TOUCH_MAJOR: measured fingertips 6-16 (raw 8-21), resting palm edge 19-49 (raw 25-63)
+    "palm_size": 20,
     "panel_buttons": None,  # filled from DEFAULT_BUTTONS below; always the active profile's buttons
     # named button sets, cycled with the arrows on the tablet panel: [{"name", "buttons"}]
     "panel_profiles": None, "panel_profile": 0,
@@ -526,6 +528,8 @@ class Engine:
         if self.cfg.get("panel_buttons") == OLD_DEFAULT_BUTTONS:
             self.cfg["panel_buttons"] = DEFAULT_BUTTONS
         load_profiles(self.cfg)
+        if self.cfg.get("palm_size") == 28:  # first guess, in raw units; Qt reports ~0.75 of that
+            self.cfg["palm_size"] = 20
         self.calibration = saved.get("calibration")
         if self.calibration and not saved.get("gui", {}).get("onboarded"):
             self.cfg["onboarded"] = True  # an existing setup (calibrated before) needs no walkthrough
