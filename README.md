@@ -119,6 +119,7 @@ After that, plugging in is all it takes.
 | 5 fingers, twist | Rotate the canvas (holds R and drags round the window centre; Shift+Space for Krita / Clip Studio) |
 | 1 finger, triple tap | New layer (Ctrl+Shift+Alt+N), changeable |
 | 5 fingers, double tap | Reset the canvas rotation (holds R and presses Esc; Krita: `5`), changeable |
+| 5 fingers, swipe down | Clean refresh of the whole tablet screen (clears e-ink leftovers) |
 | 1-finger double tap, 2-finger tap and double tap, 3-finger tap | Off until you assign keys |
 
 The default shortcuts follow Photoshop. Krita and Clip Studio use most of the same keys; change any that differ.

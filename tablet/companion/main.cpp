@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
                     // flushes on pen activity).
                     if (QQuickItem *pm = make_pen_mode_item(ink)) {
                         QMetaEnum e = pm->metaObject()->property(pm->metaObject()->indexOfProperty("mode")).enumerator();
-                        for (auto [key, prop] : {std::pair{"Pen", "modePen"}, {"UI", "modeUI"}, {"Content", "modeContent"}}) {
+                        for (auto [key, prop] : {std::pair{"Pen", "modePen"}, {"UI", "modeUI"}, {"Animation", "modeAnim"}, {"Content", "modeContent"}}) {
                             bool ok = false;
                             int v = e.keyToValue(key, &ok);
                             w->setProperty(prop, ok ? v : -1);

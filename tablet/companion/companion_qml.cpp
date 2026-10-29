@@ -74,11 +74,13 @@ Window {
     property var penModeItem: null
     property int modePen: -1
     property int modeUI: -1
+    property int modeAnim: -1
     property int modeContent: -1
     property bool epRefreshing: false
     function epMode() {
         if (!penModeItem) return
-        var m = penDown ? modePen : epRefreshing ? modeContent : traceAdjust && modeUI >= 0 ? modeUI : modePen
+        // fingers moving the image: the fast animation mode, one clean pass when they lift
+        var m = penDown ? modePen : adj ? (modeAnim >= 0 ? modeAnim : modeUI) : epRefreshing ? modeContent : modePen
         if (m >= 0 && penModeItem.mode !== m) penModeItem.mode = m
     }
     function refreshScreen() { epDebounce.restart() }
@@ -89,7 +91,9 @@ Window {
     onTraceScaleChanged: refreshScreen()
     onTraceXChanged: refreshScreen()
     onTraceYChanged: refreshScreen()
-    onTraceAdjustChanged: { epMode(); refreshScreen() }
+    onTraceAdjustChanged: refreshScreen()
+    property bool imgMoved: false
+    onAdjChanged: { if (!adj && imgMoved) { imgMoved = false; fullRefresh() } else epMode() }
     onMaskOnChanged: refreshScreen()
     onMaskEditChanged: refreshScreen()
     onMaskRunsChanged: refreshScreen()
@@ -478,11 +482,21 @@ Window {
         id: epDebounce; interval: 250
         onTriggered: {
             if (!win.penModeItem) return
-            if (win.penDown) { restart(); return }
+            if (win.penDown || win.adj) { restart(); return }
             win.epRefreshing = true; win.epMode(); epNudge.flip = !epNudge.flip; win.requestUpdate(); epBack.restart()
         }
     }
-    Timer { id: epBack; interval: 900; onTriggered: { win.epRefreshing = false; win.epMode() } }
+    Timer { id: epBack; interval: 1500; onTriggered: { win.epRefreshing = false; win.epMode() } }
+    // Whole-screen clean refresh (five fingers swiped down): black for a moment, then the page,
+    // both in Content mode, which clears e-ink leftovers.
+    function fullRefresh() {
+        epDebounce.stop(); epRefreshing = true; epMode()
+        epCover.visible = true; win.requestUpdate(); epUncover.restart()
+    }
+    Timer {
+        id: epUncover; interval: 350
+        onTriggered: { epCover.visible = false; epNudge.flip = !epNudge.flip; win.requestUpdate(); epBack.restart() }
+    }
     Timer { id: tapTimer; interval: 330; onTriggered: { if (win.tapK > 0) win.act("tap " + win.tapN + " " + win.tapK); win.tapK = 0 } }
     // Adjusting the tracing image: one finger drags it, two zoom it (about its centre).
     property var adj: null         // {c, d, x, y, s} where the current finger count began
@@ -504,6 +518,7 @@ Window {
         if (!adj || !l.length) return
         var c = centroid(l)
         adj.moved = Math.max(adj.moved, Math.abs(c.x - adj.c.x) + Math.abs(c.y - adj.c.y))
+        if (adj.moved > 5) imgMoved = true
         traceX = adj.x + c.x - adj.c.x
         traceY = adj.y + c.y - adj.c.y
         if (l.length > 1 && adj.d > 20) traceScale = Math.max(0.05, Math.min(20, adj.s * spread(l) / adj.d))
@@ -580,6 +595,10 @@ Window {
         } else if ((gMode === "five" || gMode === "rotate") && l.length === 5) {
             var a = twist()
             if (gMode === "five") {
+                var c5 = centroid(l), dy5 = c5.y - gC0.y
+                if (dy5 > 180 && Math.abs(c5.x - gC0.x) < dy5 * 0.6 && Math.abs(a) < 8) {
+                    gMode = "dead"; gTapOk = false; fullRefresh(); say("Screen refreshed"); return
+                }
                 if (Math.abs(a) < 8) return
                 gMode = "rotate"; gTapOk = false; act("rotate begin")
             }
@@ -741,6 +760,7 @@ Window {
         }
 
         Item { id: ink; objectName: "ink"; anchors.fill: parent }
+        Rectangle { id: epCover; visible: false; anchors.fill: parent; color: "black"; z: 1000 }
         Rectangle {  // one pixel that changes on each refresh, so the scene graph has a frame to send
             id: epNudge; property bool flip: false
             x: view.width - 1; y: view.height - 1; width: 1; height: 1; color: flip ? "#fefefe" : "white"
