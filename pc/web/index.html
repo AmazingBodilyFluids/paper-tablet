@@ -234,8 +234,8 @@
             <span class="switch"><input type="checkbox" id="swScreen2"><span class="track"></span></span></div>
           <div class="opt"><div class="tx"><div class="t1">Rotation</div><div class="t2">Match calibration follows how the tablet sits</div></div>
             <select class="input" data-key="companion_rot" id="rotSel" style="width:220px"></select></div>
-          <div class="opt" style="display:block"><div class="range-row"><span>Trail stays for</span><input type="range" min="0" max="5000" step="250" data-key="trail_ms" data-type="int"><span class="v" id="trailV"></span></div>
-            <p class="hint mts">E-ink can't fade smoothly, so a stroke stays for this long after you lift the pen, then clears in one refresh. Set it to 0 to keep strokes until you clear them.</p></div>
+          <div class="opt" style="display:block"><div class="range-row"><span>Trail stays for</span><input type="range" min="250" max="5250" step="250" id="trailR"><span class="v" id="trailV"></span></div>
+            <p class="hint mts">E-ink can't fade smoothly, so a stroke stays for this long after you lift the pen, then clears in one refresh. Slide all the way right for <b>Until cleared</b>: strokes stay until you press <i>Clear the tablet screen</i> below or a <i>Clear ink</i> button on the panel.</p></div>
           <div class="opt"><div class="tx"><div class="t1">Shortcut panel</div><div class="t2">16 buttons you choose yourself. Tap with a finger or the pen. <a onclick="go('panel')">Customise the buttons</a></div></div>
             <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
           <div class="opt"><div class="tx"><div class="t1">Finger gestures</div><div class="t2">Three fingers swipe left: undo, right: redo. Two fingers drag to pan, pinch to zoom.</div></div>
