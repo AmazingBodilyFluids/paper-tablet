@@ -33,7 +33,8 @@ handle undo, redo, pan and zoom.
   (profiles) as you like, for example one per app, and switch with the arrows at the top of the panel.
 - **Paper and tracing on the tablet screen.** Lined, squared, dot, cross, blueprint or isometric paper under
   your strokes, and a tracing image you can move and zoom with your fingers. The front light can go to full
-  while you trace, and comes back to your level afterwards.
+  while you trace, and comes back to your level afterwards. A trace mask works like a stencil: paint the parts of
+  the screen that should ignore the pen, right on the tablet, and drag it where you need it.
 - **Finger gestures:**
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.
@@ -114,6 +115,7 @@ After that, plugging in is all it takes.
 | 2 fingers, pinch | Zoom in / out (Ctrl+= / Ctrl+-) |
 | 5 fingers, twist | Rotate the canvas (holds R and drags round the window centre; Shift+Space for Krita / Clip Studio) |
 | 1 finger, triple tap | New layer (Ctrl+Shift+Alt+N), changeable |
+| 5 fingers, double tap | Reset the canvas rotation (holds R and presses Esc; Krita: `5`), changeable |
 | 1-finger double tap, 2-finger tap and double tap, 3-finger tap | Off until you assign keys |
 
 The default shortcuts follow Photoshop. Krita and Clip Studio use most of the same keys; change any that differ.

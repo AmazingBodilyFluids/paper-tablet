@@ -126,6 +126,8 @@ function render() {
   const tf = S.cfg.trace_file || "";
   $("#traceName").textContent = tf ? tf.split(/[\\/]/).pop() : "None. Show a photo or sketch under your strokes to trace over.";
   $("#traceDel").disabled = !tf;
+  const mk = S.cfg.mask || "", cells = [...mk].reduce((n, c) => n + [0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4][parseInt(c, 16)], 0);
+  $("#maskInfo").textContent = cells ? `${Math.round(100 * cells / (mk.length * 4))}% of the screen is masked.` : "Nothing masked yet.";
   $("#trailV").textContent = S.cfg.trail_ms ? (S.cfg.trail_ms / 1000).toFixed(S.cfg.trail_ms % 1000 ? 2 : 0) + " s" : "keep";
   $("#fitHint").textContent = {
     crop: "The whole display is reachable; a slice of the tablet goes unused if the shapes differ.",
@@ -773,7 +775,7 @@ const Panel = {
     ["Fit", "shortcut", "ctrl+0"], ["Move", "shortcut", "v"], ["Lasso", "shortcut", "l"], ["Fill", "shortcut", "g"],
     ["Swap col", "shortcut", "x"], ["Deselect", "shortcut", "ctrl+d"], ["Transform", "shortcut", "ctrl+t"],
     ["New layer", "shortcut", "ctrl+shift+n"], ["Copy", "shortcut", "ctrl+c"], ["Paste", "shortcut", "ctrl+v"],
-    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""], ["Move image", "trace", ""], ["Light", "light", ""],
+    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""], ["Move image", "trace", ""], ["Light", "light", ""], ["Mask", "mask", ""],
   ],
 
   label(spec) {
@@ -794,6 +796,7 @@ const Panel = {
     if (b.kind === "clear") return "tablet ink";
     if (b.kind === "trace") return S.cfg.trace_adjust ? "moving" : "image";
     if (b.kind === "light") return S.cfg.light ? "on" : "off";
+    if (b.kind === "mask") return S.cfg.mask_edit ? "editing" : S.cfg.mask_on ? "on" : "off";
     return "";
   },
 
@@ -803,7 +806,7 @@ const Panel = {
     if (!this.btns || (!this.dirty && saved !== JSON.stringify(this.btns))) this.btns = JSON.parse(saved);
     if (view !== "panel") return;
     this.renderProfiles();
-    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.cfg.light, S.cfg.trace_adjust]);
+    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.cfg.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_edit]);
     if (sig !== this.sig) { this.sig = sig; this.draw(); }
     if (!this.recording && document.activeElement !== $("#peName") && document.activeElement !== $("#peKeys")) this.fill();
     this.renderTaps();
@@ -1093,6 +1096,7 @@ const Panel = {
       if (k === "clear" && !b.t) patch.t = "Clear";
       if (k === "trace" && !b.t) patch.t = "Image";
       if (k === "light" && !b.t) patch.t = "Light";
+      if (k === "mask" && !b.t) patch.t = "Mask";
       if (k === "none") patch.t = "";
       this.edit(patch);
     };
@@ -1117,5 +1121,11 @@ async function pickTrace() {
 }
 async function resetTrace() {
   for (const [k, v] of [["trace_x", 0], ["trace_y", 0], ["trace_scale", 1]]) await setKey(k, v);
+  refresh();
+}
+
+async function maskOp(op) {
+  const n = 72 * 72 / 4, mk = (S.cfg.mask || "").padEnd(n, "0");
+  await setKey("mask", op === "clear" ? "0".repeat(n) : [...mk].map(c => (15 - parseInt(c, 16)).toString(16)).join(""));
   refresh();
 }

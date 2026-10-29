@@ -58,6 +58,15 @@ Window {
     property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
     property bool lightOn: false
     property bool nativeTouch: false     // fingers go to Windows as real touch, no gestures here
+    // trace mask: a 72 x 72 grid over the view; set cells are where the pen does nothing in Windows.
+    // In edit mode the pen paints cells (eraser end clears) and one finger drags the whole mask.
+    readonly property int maskN: 72
+    property var maskBits: []            // maskN * maskN of 0 / 1, row by row
+    property bool maskOn: false
+    property bool maskEdit: false
+    property var maskRuns: []            // [row, first col, last col] runs, what the overlay draws
+    property real maskDX: 0              // live finger drag while editing, in view pixels
+    property real maskDY: 0
     property int profileCount: 1
     readonly property real footH: 190
     readonly property int rows: 8
@@ -107,6 +116,10 @@ Window {
             traceSrc = src ? "file://" + src : ""
         }
         else if (c === "traceadjust") traceAdjust = a[0] === "1"
+        else if (c === "mask") {  // mask <on> <edit> <hex>
+            maskOn = a[0] === "1"; maskEdit = a[1] === "1"
+            if (a.length > 2) { maskBits = maskFromHex(a[2]); maskRedraw() }
+        }
         else if (c === "profile") { profileCount = parseInt(a[1]); profileName = a.slice(2).join(" ") }
         else if (c === "gestures") {
             gesturesOn = a[0] === "1"
@@ -152,6 +165,72 @@ Window {
         }
         if (penDown) held = st
         else if (fadeMs > 0) st.fade(fadeMs)
+    }
+
+    // ---- trace mask
+    function maskFromHex(h) {
+        var n = maskN * maskN, out = new Array(n)
+        for (var i = 0; i < n; i++) {
+            var d = parseInt(h.charAt(i >> 2), 16) || 0
+            out[i] = (d >> (3 - (i & 3))) & 1
+        }
+        return out
+    }
+    function maskHex() {
+        var s = "", n = maskN * maskN
+        for (var i = 0; i < n; i += 4)
+            s += ((maskBits[i] << 3) | (maskBits[i + 1] << 2) | (maskBits[i + 2] << 1) | maskBits[i + 3]).toString(16)
+        return s
+    }
+    function maskRedraw() {
+        var runs = []
+        for (var r = 0; r < maskN; r++) {
+            var c0 = -1
+            for (var c = 0; c <= maskN; c++) {
+                var on = c < maskN && maskBits[r * maskN + c]
+                if (on && c0 < 0) c0 = c
+                if (!on && c0 >= 0) { runs.push([r, c0, c - 1]); c0 = -1 }
+            }
+        }
+        maskRuns = runs
+    }
+    function maskPaint(p, value) {  // a round brush, 2 cells across each way
+        var cx = Math.floor(p.x / view.width * maskN), cy = Math.floor(p.y / view.height * maskN), hit = false
+        for (var dy = -2; dy <= 2; dy++)
+            for (var dx = -2; dx <= 2; dx++) {
+                if (dx * dx + dy * dy > 5) continue
+                var x = cx + dx, y = cy + dy
+                if (x < 0 || y < 0 || x >= maskN || y >= maskN) continue
+                if (maskBits[y * maskN + x] !== value) { maskBits[y * maskN + x] = value; hit = true }
+            }
+        if (hit) maskTimer.start()
+    }
+    Timer { id: maskTimer; interval: 120; onTriggered: win.maskRedraw() }
+    function maskShift(dx, dy) {  // move the whole mask by whole cells
+        var out = new Array(maskN * maskN)
+        for (var r = 0; r < maskN; r++)
+            for (var c = 0; c < maskN; c++) {
+                var sr = r - dy, sc = c - dx
+                out[r * maskN + c] = sr >= 0 && sc >= 0 && sr < maskN && sc < maskN ? maskBits[sr * maskN + sc] : 0
+            }
+        maskBits = out
+        maskRedraw()
+    }
+    property var maskDrag: null
+    property bool maskDirty: false
+    function maskFingers() {
+        var l = gList()
+        if (l.length === 1 && !maskDrag) maskDrag = {x: l[0].x, y: l[0].y}
+        if (l.length === 0 && maskDrag) {
+            var dx = Math.round(maskDX / view.width * maskN), dy = Math.round(maskDY / view.height * maskN)
+            maskDX = 0; maskDY = 0; maskDrag = null
+            if (dx || dy) { maskShift(dx, dy); act("mask " + maskHex()) }
+        }
+    }
+    function maskFingerMoved() {
+        var l = gList()
+        if (!maskDrag || l.length !== 1) return
+        maskDX = l[0].x - maskDrag.x; maskDY = l[0].y - maskDrag.y
     }
 
     // ---- panel: the fold tab and the buttons, by finger or pen
@@ -204,6 +283,7 @@ Window {
         else if (b.kind === "local") { clearInk() }
         else if (b.kind === "trace") { act("traceadjust") }
         else if (b.kind === "light") { act("light") }
+        else if (b.kind === "mask") { act("maskedit") }
         else if (b.kind === "hold") {
             if (latched[i]) { act("release " + i); setLatch(i, false); keepLatch = false; say(b.t + " released") }
             else { act("press " + i); setLatch(i, true); keepLatch = true; holdStart = Date.now() }
@@ -235,6 +315,12 @@ Window {
             endStroke()
             if (touching && penBtn === -1) { penBtn = pressAt(p); if (penBtn === -1) penBtn = 99 }
             else if (!touching || !inPanel(p)) { if (penBtn >= 0 && penBtn !== 99) releaseBtn(penBtn, true); else pressing = -1; penBtn = -1 }
+            return
+        }
+        if (maskEdit && mode === "ink") {  // painting the mask: the pen stays on the tablet
+            endStroke()
+            if (touching) { maskPaint(p, eraser ? 0 : 1); maskDirty = true }
+            else if (maskDirty) { maskDirty = false; maskRedraw(); act("mask " + maskHex()) }
             return
         }
         penDown = touching
@@ -319,7 +405,8 @@ Window {
     // A finished touch: count it towards a tap series and report the series once no further
     // tap follows (the PC decides what "tap 1 3" etc. do; unassigned ones do nothing).
     function touchEnded() {
-        var tap = gTapOk && gMax <= 3 && gMoved < 30 && Date.now() - gT0 < 350
+        // five fingers never land or lift quite together, so they get a little longer
+        var tap = gTapOk && (gMax <= 3 || gMax === 5) && gMoved < 30 && Date.now() - gT0 < (gMax === 5 ? 500 : 350)
         if (!tap) { tapTimer.stop(); tapK = 0; return }
         if (tapTimer.running && tapN === gMax) tapK++
         else { tapN = gMax; tapK = 1 }
@@ -371,12 +458,13 @@ Window {
     // Every contact to the PC as fractions of the view: "touch live|dead <palms> id x y ...". The PC
     // shows them on its live view and, in Windows-touch mode, injects them ("dead" = lift them all).
     function sendTouch() {
-        var out = ["touch", gMode === "dead" || traceAdjust ? "dead" : "live", Object.keys(palms).length]
+        var out = ["touch", gMode === "dead" || traceAdjust || maskEdit ? "dead" : "live", Object.keys(palms).length]
         for (var id in gPts)
             out.push(id, (gPts[id].x / view.width).toFixed(4), (gPts[id].y / view.height).toFixed(4))
         act(out.join(" "))
     }
     function fingersChanged() {
+        if (maskEdit) { maskFingers(); return }
         if (traceAdjust) { adjustChanged(); return }
         var l = gList(), n = l.length
         gMax = Math.max(gMax, n)
@@ -407,6 +495,7 @@ Window {
         }
     }
     function fingersMoved() {
+        if (maskEdit) { maskFingerMoved(); return }
         if (traceAdjust) { adjustMoved(); return }
         var l = gList()
         for (var id in gPts) {
@@ -508,6 +597,29 @@ Window {
                 anchors.fill: parent
                 active: win.paper !== "plain"
                 sourceComponent: win.paper === "dots" || win.paper === "cross" ? marks : lines
+            }
+            Item {  // trace mask: masked cells as a light grey (the pen does nothing there)
+                visible: win.maskOn || win.maskEdit
+                x: -paperArea.x + win.maskDX; y: win.maskDY; width: view.width; height: view.height
+                Repeater {
+                    model: win.maskRuns
+                    Rectangle {
+                        x: modelData[1] * view.width / win.maskN; y: modelData[0] * view.height / win.maskN
+                        width: (modelData[2] - modelData[1] + 1) * view.width / win.maskN + 0.5
+                        height: view.height / win.maskN + 0.5
+                        color: win.maskEdit ? "#999999" : "#cccccc"; antialiasing: false
+                    }
+                }
+            }
+            Rectangle {  // mask editing: say what the pen and fingers do now
+                visible: win.maskEdit; anchors.fill: parent; anchors.margins: 6
+                color: "transparent"; border.width: 6; border.color: "black"
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: mhint.width + 40; height: 60
+                    color: "black"; radius: 12
+                    Text { id: mhint; anchors.centerIn: parent; color: "white"; font.pixelSize: 26; font.bold: true
+                           text: "Editing the mask: pen paints, eraser clears, 1 finger moves it" }
+                }
             }
             Rectangle {  // while adjusting: a frame says fingers move the image
                 visible: win.traceAdjust; anchors.fill: parent; anchors.margins: 6
@@ -624,6 +736,7 @@ Window {
                     property bool on: win.pressing === index || (b.kind === "hold" && !!win.latched[index])
                                       || (b.kind === "pen" && win.penOut) || (b.kind === "snap" && win.snapOn)
                                       || (b.kind === "trace" && win.traceAdjust) || (b.kind === "light" && win.lightOn)
+                                      || (b.kind === "mask" && win.maskEdit)
                     x: (index % 2) * win.cellW
                     y: win.headH + Math.floor(index / 2) * win.cellH
                     width: win.cellW; height: win.cellH
@@ -640,7 +753,8 @@ Window {
                             Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 18
                                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 12
                                    text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off")
-                                       : cell.b.kind === "light" ? (win.lightOn ? "on" : "off") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
+                                       : cell.b.kind === "light" ? (win.lightOn ? "on" : "off")
+                                       : cell.b.kind === "mask" ? (win.maskEdit ? "editing" : win.maskOn ? "on" : "off") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
                                    color: cell.on ? "white" : "black" }
                         }
                     }

@@ -4,6 +4,7 @@ import types
 import unittest
 
 import core
+import rmtablet as rt
 import keys
 
 
@@ -226,6 +227,38 @@ class PaperAndTrace(Profiles):
     def test_new_button_kinds_survive_cleaning(self):
         b = core.clean_buttons([{"t": "Image", "kind": "trace"}, {"t": "Light", "kind": "light"}])
         self.assertEqual([x["kind"] for x in b[:2]], ["trace", "light"])
+
+
+class TraceMask(Profiles):
+    def state(self, x, y):
+        return rt.PenState(x=x, y=y, pen=True)
+
+    def test_mask_round_trip_and_hit_test(self):
+        e = self.engine()
+        e.mapper = rt.Mapper(absinfo={"X": {"min": 0, "max": 7199}, "Y": {"min": 0, "max": 7199},
+                                      "PRESSURE": {"min": 0, "max": 4096}}, monitor=(0, 0, 1920, 1080), fit="stretch")
+        e.cal = None
+        bits = bytearray(core.MASK_N * core.MASK_N)
+        bits[0] = 1                      # top-left cell
+        bits[10 * core.MASK_N + 20] = 1  # row 10, column 20
+        h = "".join(f"{(bits[i] << 3) | (bits[i+1] << 2) | (bits[i+2] << 1) | bits[i+3]:x}" for i in range(0, len(bits), 4))
+        e.tablet_action("mask " + h)
+        self.assertTrue(e.cfg["mask_on"])  # painting a mask switches it on
+        self.assertEqual(core.mask_bits(e.cfg["mask"]), bytes(bits))
+        self.assertTrue(e.masked(self.state(50, 50)))
+        self.assertTrue(e.masked(self.state(20 * 100 + 50, 10 * 100 + 50)))
+        self.assertFalse(e.masked(self.state(21 * 100 + 50, 10 * 100 + 50)))
+        e.set("mask_on", False)
+        self.assertFalse(e.masked(self.state(50, 50)))
+
+    def test_editing_keeps_the_pen_from_windows(self):
+        e = self.engine({"mask_edit": True})
+        e.mapper, e.cal = object(), None
+        self.assertTrue(e.masked(self.state(1, 1)))
+
+    def test_bad_masks_are_cleaned(self):
+        self.assertEqual(len(core.clean_mask("zz12")), core.MASK_N * core.MASK_N // 4)
+        self.assertEqual(core.clean_mask("F")[0], "f")
 
 
 class PanelGeometry(unittest.TestCase):

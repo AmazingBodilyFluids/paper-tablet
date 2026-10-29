@@ -54,6 +54,9 @@ DEFAULTS = {
     "paper": "plain", "paper_mm": 5.0,
     "trace_file": "", "trace_opacity": 0.5, "trace_scale": 1.0, "trace_x": 0.0, "trace_y": 0.0,
     "trace_adjust": False, "light": False,
+    # trace mask: MASK_N x MASK_N cells over the tablet screen (hex, row by row); where a cell is set,
+    # the pen does nothing in Windows. Painted on the tablet itself in edit mode.
+    "mask": "", "mask_on": False, "mask_edit": False,
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
     "taps": None,           # tap gestures, filled from DEFAULT_TAPS below
@@ -79,11 +82,14 @@ DEFAULTS["panel_buttons"] = DEFAULT_BUTTONS
 # Tap gestures on the drawing area: "fingers x taps" -> title and keys ("" = nothing).
 # Ctrl+Shift+Alt+N is Photoshop's "new layer" without the dialog.
 TAP_SLOTS = {"1x2": "One finger, double tap", "1x3": "One finger, triple tap", "2x1": "Two-finger tap",
-             "2x2": "Two-finger double tap", "3x1": "Three-finger tap"}
+             "2x2": "Two-finger double tap", "3x1": "Three-finger tap", "5x2": "Five-finger double tap"}
+# 5x2 resets the canvas rotation: in Photoshop, Esc while the rotate tool is held (R); Krita uses 5
 DEFAULT_TAPS = {"1x2": {"t": "", "keys": ""}, "1x3": {"t": "New layer", "keys": "ctrl+shift+alt+n"},
-                "2x1": {"t": "", "keys": ""}, "2x2": {"t": "", "keys": ""}, "3x1": {"t": "", "keys": ""}}
+                "2x1": {"t": "", "keys": ""}, "2x2": {"t": "", "keys": ""}, "3x1": {"t": "", "keys": ""},
+                "5x2": {"t": "Reset rotation", "keys": "r+esc"}}
 DEFAULTS["taps"] = DEFAULT_TAPS
-BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "trace", "light", "none")
+BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "trace", "light", "mask", "none")
+MASK_N = 72
 # fingers: "shortcuts" turns gestures into keys (pan = Space+drag ...); "windows" hands every
 # contact to Windows as real touch, so apps do their own scrolling, zooming and inertia
 TOUCH_MODES = ("shortcuts", "windows")
@@ -91,6 +97,18 @@ PAPERS = ("plain", "lined", "squared", "dots", "cross", "blueprint", "isometric"
 PANEL_PX_PER_MM = 2160 / 239.6  # Paper Pro: 1620 x 2160 px on a 179.7 x 239.6 mm panel (229 ppi)
 TRACE_MAX_BYTES = 30 * 1024 * 1024
 FRONTLIGHT = "/sys/class/backlight/rm_frontlight"
+
+
+def clean_mask(h):
+    """A mask as exactly MASK_N * MASK_N / 4 lower-case hex digits (empty or bad input: nothing masked)."""
+    n = MASK_N * MASK_N // 4
+    h = "".join(c for c in str(h or "").lower() if c in "0123456789abcdef")[:n]
+    return h + "0" * (n - len(h))
+
+
+def mask_bits(h):
+    """Hex mask -> bytes of 0 / 1, one per cell."""
+    return bytes((int(c, 16) >> (3 - k)) & 1 for c in clean_mask(h) for k in range(4))
 
 
 def clean_profiles(profiles, current=None):
@@ -136,7 +154,7 @@ def clean_taps(taps):
     taps = taps if isinstance(taps, dict) else {}
     out = {}
     for slot in TAP_SLOTS:
-        t = taps.get(slot) if isinstance(taps.get(slot), dict) else {}
+        t = taps.get(slot) if isinstance(taps.get(slot), dict) else DEFAULT_TAPS.get(slot, {})  # new slots: default
         k = str(t.get("keys") or "").lower().replace(" ", "")
         try:
             k = "+".join(keys.parse(k)) if k else ""
@@ -469,7 +487,7 @@ class Worker(threading.Thread):
                         if down and not was_down:
                             e.on_tap((s.x, s.y))
                     elif pen_out is not None:
-                        if e.over_panel(s):
+                        if e.over_panel(s) or e.masked(s):
                             s = rt.PenState()  # over the tablet's buttons: out of range for Windows
                         frames = self.translator.step(s)
                         if snap:
@@ -554,6 +572,7 @@ class Engine:
         self.last_action = None
         self.touch = None       # the latest finger report from the tablet, for the live view
         self.touch_out = None   # WindowsTouch, made when a profile first uses Windows touch
+        self.mask = mask_bits(self.cfg.get("mask"))
         self.rate = RateMeter()
         self.mapper = None
         self.refresh_mapper()
@@ -670,6 +689,9 @@ class Engine:
                 val = max(0.05, min(20.0, float(val)))
             if key in ("trace_x", "trace_y"):
                 val = float(val)
+            if key == "mask":
+                val = clean_mask(val)
+                self.mask = mask_bits(val)
             self.cfg[key] = val
             self.refresh_mapper()
             self.save()
@@ -678,7 +700,7 @@ class Engine:
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
                    "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
                    "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
-                   "trace_adjust", "light"):
+                   "trace_adjust", "light", "mask_on", "mask_edit"):
             self.sync_companion()
         if key == "light" and self.companion.running:
             threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
@@ -713,6 +735,18 @@ class Engine:
             a = list(self.cfg["area"])
         return a
 
+    def masked(self, s):
+        """Is the pen over the trace mask (or is the mask being painted)? Then Windows doesn't get it."""
+        if not s.in_range or not self.mapper or self.cal is not None:
+            return False
+        if self.cfg.get("mask_edit") and self.companion.running:
+            return True
+        if not self.cfg.get("mask_on"):
+            return False
+        p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
+        c, r = min(MASK_N - 1, max(0, int(p * MASK_N))), min(MASK_N - 1, max(0, int(q * MASK_N)))
+        return self.mask[r * MASK_N + c] == 1
+
     def over_panel(self, s):
         """Is the pen above the tablet's side panel? Then it presses buttons there, not in Windows."""
         if not self.panel_shown() or not s.in_range or not self.mapper:
@@ -736,7 +770,7 @@ class Engine:
         for b in self.buttons():
             kind = {"shortcut": "tap", "clear": "local"}.get(b["kind"], b["kind"])
             sub = {"shortcut": keys.label(b["keys"]), "hold": "holds " + keys.label(b["keys"]),
-                   "clear": "tablet ink", "trace": "image"}.get(b["kind"], "")
+                   "clear": "tablet ink", "trace": "image", "mask": "mask"}.get(b["kind"], "")
             out.append({"t": b["t"], "s": sub, "kind": kind})
         return out
 
@@ -797,6 +831,12 @@ class Engine:
                 self.cfg["trace_x"], self.cfg["trace_y"] = float(parts[1]), float(parts[2])
                 self.cfg["trace_scale"] = max(0.05, min(20.0, float(parts[3])))
                 self.save()
+        elif name == "mask" and len(parts) == 2:  # painted or moved on the tablet
+            self.set("mask", parts[1])
+            if not self.cfg.get("mask_on"):
+                self.set("mask_on", True)
+        elif name == "maskedit":
+            self.set("mask_edit", not self.cfg.get("mask_edit"))
         elif name == "traceadjust":
             self.set("trace_adjust", not self.cfg.get("trace_adjust"))
         elif name == "light":
@@ -1121,6 +1161,7 @@ class Engine:
         c.send(f"trace {float(self.cfg['trace_opacity']):.2f} {float(self.cfg['trace_scale']):.4f} "
                f"{float(self.cfg['trace_x']):.1f} {float(self.cfg['trace_y']):.1f} {remote}")
         c.send(f"traceadjust {int(bool(self.cfg.get('trace_adjust')) and bool(remote))}")
+        c.send(f"mask {int(bool(self.cfg.get('mask_on')))} {int(bool(self.cfg.get('mask_edit')))} {clean_mask(self.cfg.get('mask'))}")
         c.send("status Connected to PC. Pen " + ("on" if self.output_on else "off")
                + (", shapes on" if self.cfg.get("snap") else ""))
         if self.cal is not None:
