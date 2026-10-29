@@ -47,6 +47,12 @@ systemctl stop xochitl
 rm -f /tmp/epframebuffer.lock
 sleep 1
 echo "companion: starting $(date)" > "$LOG"
+# The rM1 / rM2 touch panels are mounted turned against the screen; reMarkable's Qt guide
+# (developer.remarkable.com/documentation/qt_epaper) gives these settings. The Paper Pro needs none.
+case "$(cat /sys/devices/soc0/machine 2>/dev/null)" in
+    "reMarkable 2.0") export QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS="${QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS:-rotate=180:invertx}" ;;
+    "reMarkable 1.0"|"reMarkable Prototype 1") export QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS="${QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS:-rotate=180}" ;;
+esac
 QT_QUICK_BACKEND=epaper "$DIR/rmpp-companion" -platform "${COMPANION_PLATFORM:-epaper}" "$@" <&3 2>&1 | tee -a "$LOG" &
 APP=$!
 wait "$APP"

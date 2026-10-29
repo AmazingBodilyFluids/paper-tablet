@@ -1,4 +1,5 @@
-// rmpp-companion: optional tablet-side screen for the PC bridge (reMarkable Paper Pro).
+// rmpp-companion: optional tablet-side screen for the PC bridge (reMarkable Paper Pro, and the
+// reMarkable 1 and 2 from the same source, built with their own SDKs).
 //
 // Runs only while the PC app keeps it open: xochitl is stopped by run.sh and restarted when
 // this exits. Draws calibration crosshairs, a status line, the active-area outline and an
@@ -140,7 +141,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "companion: screen %dx%d dpr %.2f, scenegraph %s\n", g.width(), g.height(),
                 scr ? scr->devicePixelRatio() : 0.0, qPrintable(QQuickWindow::sceneGraphBackend()));
         if (w->width() <= 0 || w->height() <= 0) {
-            // Paper Pro panel, portrait; used only if the platform reports no screen size.
+            // Paper Pro panel, portrait; used only if the platform reports no screen size (the rM1 / rM2
+            // report theirs, 1404 x 1872).
             if (g.width() <= 0 || g.height() <= 0) g = QRect(0, 0, 1620, 2160);
             w->setGeometry(g);
         }
@@ -171,15 +173,20 @@ int main(int argc, char **argv) {
         }, Qt::DirectConnection);
     }
 
-    // Pen: read in parallel with the PC stream (no grab). Digitizer -> panel pixels.
+    // Pen: read in parallel with the PC stream (no grab). Digitizer -> panel pixels. The Paper
+    // Pro's Elan digitizer runs with the panel; the rM1 / rM2 Wacom one is turned 270 degrees
+    // (its X runs up the long side from the bottom, its Y to the right).
     char pen_path[64] = "";
     int pen_fd = open_input("marker", pen_path, sizeof pen_path);
+    bool wacom = false;
+    if (pen_fd < 0) wacom = (pen_fd = open_input("Wacom", pen_path, sizeof pen_path)) >= 0;
     input_absinfo ax{}, ay{}, ap{};
     if (pen_fd >= 0) {
         ioctl(pen_fd, EVIOCGABS(ABS_X), &ax);
         ioctl(pen_fd, EVIOCGABS(ABS_Y), &ay);
         ioctl(pen_fd, EVIOCGABS(ABS_PRESSURE), &ap);
-        fprintf(stderr, "companion: pen %s X %d..%d Y %d..%d\n", pen_path, ax.minimum, ax.maximum, ay.minimum, ay.maximum);
+        fprintf(stderr, "companion: pen %s X %d..%d Y %d..%d%s\n", pen_path, ax.minimum, ax.maximum,
+                ay.minimum, ay.maximum, wacom ? " (turned 270)" : "");
     } else {
         fprintf(stderr, "companion: no pen device found\n");
     }
@@ -206,6 +213,7 @@ int main(int argc, char **argv) {
                         double W = win ? win->width() : 1620, H = win ? win->height() : 2160;
                         double fx = double(pen.x - ax.minimum) / std::max(1, ax.maximum - ax.minimum);
                         double fy = double(pen.y - ay.minimum) / std::max(1, ay.maximum - ay.minimum);
+                        if (wacom) { double t = fx; fx = fy; fy = 1 - t; }
                         if (flip_x) fx = 1 - fx;
                         if (flip_y) fy = 1 - fy;
                         double pr = double(pen.p) / std::max(1, ap.maximum);
@@ -220,7 +228,8 @@ int main(int argc, char **argv) {
 
     // Power button quits (hand the screen back).
     char pwr_path[64];
-    int pwr_fd = open_input("powerkey", pwr_path, sizeof pwr_path);
+    int pwr_fd = open_input("powerkey", pwr_path, sizeof pwr_path);  // Paper Pro, rM2 ("snvs-powerkey")
+    if (pwr_fd < 0) pwr_fd = open_input("gpio-keys", pwr_path, sizeof pwr_path);  // rM1: its buttons and power
     if (pwr_fd >= 0) {
         auto *wn = new QSocketNotifier(pwr_fd, QSocketNotifier::Read, &app);
         QObject::connect(wn, &QSocketNotifier::activated, &app, [pwr_fd] {

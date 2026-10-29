@@ -54,11 +54,25 @@ static int cmp_names(const struct dirent **a, const struct dirent **b) {
 }
 static int is_event(const struct dirent *d) { return strncmp(d->d_name, "event", 5) == 0; }
 
+/* First line of a small text file, JSON-quoted, or null (device-tree strings end in NUL). */
+static void json_file(const char *path) {
+    char buf[128] = "";
+    FILE *f = fopen(path, "r");
+    if (!f || !fgets(buf, sizeof buf, f)) { if (f) fclose(f); printf("null"); return; }
+    fclose(f);
+    buf[strcspn(buf, "\n")] = 0;
+    json_str(buf);
+}
+
 static int cmd_info(void) {
     struct utsname u;
     uname(&u);
     printf("{\"machine\":"); json_str(u.machine);
     printf(",\"release\":"); json_str(u.release);
+    /* which reMarkable: "reMarkable 1.0", "reMarkable 2.0", ... */
+    printf(",\"model\":"); json_file("/sys/devices/soc0/machine");
+    printf(",\"dt_model\":"); json_file("/proc/device-tree/model");
+    printf(",\"hwrevision\":"); json_file("/etc/hwrevision");
     printf(",\"input_event_size\":%zu,\"devices\":[", sizeof(struct input_event));
     struct dirent **list;
     int n = scandir("/dev/input", &list, is_event, cmp_names);

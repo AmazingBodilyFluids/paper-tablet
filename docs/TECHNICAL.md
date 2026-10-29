@@ -37,6 +37,19 @@ Since then the whole chain has been used for real: hover, full pressure, tilt an
 as a native pen (pressure confirmed in Photoshop), the tablet screen draws, and the shortcut panel, hold-to-snap
 shapes and finger gestures work on the device.
 
+### reMarkable 2 and 1 (beta, not yet run on hardware)
+
+| Claim | Status | Source |
+|---|---|---|
+| 32-bit ARM (Cortex-A7 on the rM2, A9 on the rM1), 16-byte evdev records | From the SDKs; the parser already takes 16-byte records | reMarkable's 3.28.0.172 rm1 / rm2 SDKs |
+| Same Qt (6.10.3) and e-paper scene graph as the Paper Pro, including `EPScreenModeItem` with the same constructor | **Confirmed in the SDK sysroots** (`nm -DC libqsgepaper.so`); the rM2 build drives its screen through `EPFramebufferSwtcon` inside that library | same |
+| Tablet-screen app starts and its QML loads on those Qt libraries | **Confirmed under emulation** (qemu-arm, the SDK sysroot, offscreen platform); the real e-paper platform is untested | 2026-10-29 |
+| Pen = Wacom digitizer turned 270° against the panel (raw X up the long side from the bottom, raw Y to the right) | From libremarkable (MIT) `get_wacom_placement`; the app turns each report to run with the panel, so calibration, shapes and the mask stay model-neutral | libremarkable `src/device/mod.rs` |
+| Touch turned 180° (rM2 also mirrored in X) | From reMarkable's Qt guide; `run.sh` sets `QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS` | developer.remarkable.com/documentation/qt_epaper |
+| Model from `/sys/devices/soc0/machine` ("reMarkable 1.0" / "reMarkable 2.0") | libremarkable reads the same file; the helper now reports it | same |
+| No developer mode needed | reMarkable: developer mode "is not relevant for the first two paper tablet generations" | developer.remarkable.com/documentation/developer-mode |
+| Tilt direction, palm-size thresholds, digitizer reach past the screen edge | **Unknown**: needs one session on a real tablet | |
+
 ## Tablet screen (companion app)
 
 `tablet/companion/` is a small Qt Quick app built with reMarkable's official Paper Pro SDK (OS 3.28 SDK,

@@ -238,3 +238,46 @@ class Mapping(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OlderModels(unittest.TestCase):
+    """reMarkable 1 / 2: Wacom digitizer turned 270 degrees against the panel."""
+    WACOM = {"path": "/dev/input/event1", "name": "Wacom I2C Digitizer", "keys": ["TOOL_PEN", "TOOL_RUBBER", "TOUCH"],
+             "abs": {"X": {"min": 0, "max": 20967}, "Y": {"min": 0, "max": 15725}, "PRESSURE": {"min": 0, "max": 4095},
+                     "TILT_X": {"min": -9000, "max": 9000}, "TILT_Y": {"min": -9000, "max": 9000}}}
+
+    def info(self, model=None, machine="armv7l", devs=None):
+        return {"machine": machine, "model": model, "input_event_size": 16, "devices": devs or [self.WACOM]}
+
+    def test_detects_the_model(self):
+        import devices
+        self.assertEqual(devices.detect(self.info("reMarkable 2.0")).key, "rm2")
+        self.assertEqual(devices.detect(self.info("reMarkable 1.0")).key, "rm1")
+        self.assertEqual(devices.detect(self.info(None, "aarch64", [])).key, "ferrari")  # older helper
+        self.assertEqual(devices.detect({"machine": "armv7l", "devices": [self.WACOM, {"name": "pt_mt"}]}).key, "rm2")
+        self.assertEqual(rt.event_format(self.info()), "<llHHi")
+
+    def test_wacom_axes_turn_to_run_with_the_panel(self):
+        pen = rt.pick_pen(self.info("reMarkable 2.0"))
+        self.assertEqual(pen["rot"], 270)
+        self.assertFalse(pen["invert_tilt_y"])
+        self.assertEqual((pen["abs"]["X"]["max"], pen["abs"]["Y"]["max"]), (15725, 20967))  # short side across
+        p = rt.EvdevParser("<llHHi", pen)
+        ev = lambda t, c, v: struct.pack("<llHHi", 0, 0, t, c, v)
+        # raw X near its max = near the top of the panel; raw Y near 0 = left edge
+        data = (ev(1, rt.BTN_TOOL_PEN, 1) + ev(3, rt.ABS_X, 20000) + ev(3, rt.ABS_Y, 1000)
+                + ev(3, rt.ABS_TILT_X, 3000) + ev(3, rt.ABS_TILT_Y, -2000) + ev(0, 0, 0))
+        s = list(p.feed(data))[-1]
+        self.assertEqual((s.x, s.y), (1000, 967))
+        self.assertEqual((s.tilt_x, s.tilt_y), (-2000, -3000))
+        m = rt.Mapper(absinfo=pen["abs"], monitor=(0, 0, 1000, 1000), fit="stretch", invert_tilt_y=False)
+        u, v = m.uv(s.x, s.y)
+        self.assertLess(u, 0.1)
+        self.assertLess(v, 0.1)
+
+    def test_paper_pro_pen_is_unchanged(self):
+        elan = dict(self.WACOM, name="Elan marker input")
+        pen = rt.pick_pen(self.info(None, "aarch64", [elan]))
+        self.assertEqual((pen["rot"], pen["invert_tilt_y"]), (0, True))
+        self.assertEqual(pen["abs"]["X"]["max"], 20967)
+

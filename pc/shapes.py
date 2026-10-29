@@ -11,7 +11,8 @@ import math
 import sys
 import time
 
-from rmtablet import Frame, PANEL_MM, _solve
+import rmtablet
+from rmtablet import Frame, _solve
 
 
 # --------------------------------------------------------------------------- geometry helpers
@@ -486,13 +487,13 @@ class Snapper:
 
     def mm(self, x, y):
         ax, ay = self.m.absinfo["X"], self.m.absinfo["Y"]
-        return ((x - ax["min"]) / ((ax["max"] - ax["min"]) or 1) * PANEL_MM[0],
-                (y - ay["min"]) / ((ay["max"] - ay["min"]) or 1) * PANEL_MM[1])
+        return ((x - ax["min"]) / ((ax["max"] - ax["min"]) or 1) * rmtablet.PANEL_MM[0],
+                (y - ay["min"]) / ((ay["max"] - ay["min"]) or 1) * rmtablet.PANEL_MM[1])
 
     def raw(self, x, y):
         ax, ay = self.m.absinfo["X"], self.m.absinfo["Y"]
-        return (ax["min"] + x / PANEL_MM[0] * (ax["max"] - ax["min"]),
-                ay["min"] + y / PANEL_MM[1] * (ay["max"] - ay["min"]))
+        return (ax["min"] + x / rmtablet.PANEL_MM[0] * (ax["max"] - ax["min"]),
+                ay["min"] + y / rmtablet.PANEL_MM[1] * (ay["max"] - ay["min"]))
 
     def feed(self, s, frames):
         out = []
