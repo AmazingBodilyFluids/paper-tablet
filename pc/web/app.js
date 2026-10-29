@@ -55,7 +55,7 @@ async function liveLoop() {
       LIVE = { pen: null };
     }
     try { drawLive(); } catch (e) { console.error("live", e); }
-    await sleep(visible ? 33 : 250);
+    await sleep(visible ? (view === "pen" ? 16 : 33) : 250);
   }
 }
 
@@ -69,6 +69,8 @@ function status() {
     const bits = [];
     bits.push(S.output ? "The pen is drawing in Windows." : "The pen is connected but not sent to Windows yet.");
     if (S.screen) bits.push("Your strokes show on the tablet screen.");
+    const b = S.battery;
+    if (b && b.pct <= 15 && b.status !== "charging") bits.push(`The tablet's battery is at ${b.pct}%.`);
     return { dot: "ok", lbl: "Connected", title: S.output ? "Ready. Draw away." : "Connected", text: bits.join(" ") };
   }
   if (st.kind === "connecting") return { dot: "busy", lbl: "Connecting", title: "Connecting…", text: st.text };
@@ -101,7 +103,7 @@ function render() {
     ? (S.via === "wifi" && S.connected ? `Connected over Wi-Fi to ${S.cfg.wifi_host}.` : `When the cable is out, the app looks for the tablet at ${S.cfg.wifi_host || "?"}. Its address is refreshed whenever you plug in.`)
     : "Turn this on with the cable plugged in and the tablet on your Wi-Fi.";
   $("#devName").textContent = S.device ? S.model.name + (S.model.verified ? "" : " (beta)") : (S.ssh ? "Tablet found" : "Not connected");
-  $("#devMeta").textContent = S.device ? `${S.cfg.host} · kernel ${S.device.kernel}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
+  $("#devMeta").textContent = S.device ? `${S.via === "wifi" ? S.cfg.wifi_host : S.cfg.host} · ${batteryText(S.battery)}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
 
   setToggle("#swOutput", "#cardOutput", S.output, S.connected);
   setToggle("#swScreen", "#cardScreen", S.screen, S.connected);
@@ -124,6 +126,7 @@ function render() {
     else el.value = v ?? "";
   }
   $("#gammaV").textContent = (+S.cfg.gamma).toFixed(2);
+  for (const b of $$("#gammaPresets button")) b.classList.toggle("on", Math.abs(+b.dataset.v - S.cfg.gamma) < 0.001);
   $("#threshV").textContent = Math.round(S.cfg.threshold * 100) + "%";
   $("#paperV").textContent = (+S.cfg.paper_mm).toFixed(1).replace(/\.0$/, "") + " mm";
   $("#traceV").textContent = Math.round(S.cfg.trace_opacity * 100) + "%";
@@ -169,6 +172,8 @@ function render() {
 }
 
 const pct = v => Math.round(v * 100) + "%";
+const batteryText = b => !b ? "battery unknown" : `${b.pct}%` + (b.status === "charging" ? ", charging" : b.status === "full" ? ", full" : "");
+for (const b of $$("#gammaPresets button")) b.onclick = () => { setKey("gamma", +b.dataset.v).then(refresh); drawCurve(); };
 
 function button(text, cls, fn) {
   const b = document.createElement("button");
@@ -414,12 +419,38 @@ function drawLive() {
       `<span><b>tilt</b> ${p.tilt[0]}°, ${p.tilt[1]}°</span><span><b>display</b> ${p.screen[0]}, ${p.screen[1]}</span>`
     : (S && S.connected ? "<span>Hover the pen over the tablet</span>" : "");
   if (view === "pen") {
+    scribble(p);
     const max = S ? S.pressure_max : 4096, peak = LIVE.peak || 0;
     $("#peakBar").style.width = (100 * peak / max) + "%";
     $("#peakText").textContent = peak ? `Highest: ${Math.round(100 * peak / max)}% of the pen's range` : "Not pressed yet";
     if (p && p.touching) drawCurve(p.raw);
   }
 }
+
+// The scribble pad on Pen feel: strokes build up between frames, width from the pressure sent to apps.
+let scribLast = null;
+function scribble(p) {
+  const cv = $("#scribble");
+  if (!cv || !cv.offsetParent) { scribLast = null; return; }
+  const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * d) || cv.height !== Math.round(r.height * d)) {  // first show or a resize: start clean
+    cv.width = Math.round(r.width * d); cv.height = Math.round(r.height * d);
+    scribLast = null;
+  }
+  if (!p || !p.touching) { scribLast = null; return; }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  const x = p.p * r.width, y = p.q * r.height;
+  ctx.lineCap = ctx.lineJoin = "round";
+  ctx.strokeStyle = p.eraser ? C.bg : C.marker;
+  ctx.lineWidth = p.eraser ? 24 : 0.5 + 11 * p.out / 1024;
+  ctx.beginPath();
+  ctx.moveTo(scribLast ? scribLast[0] : x, scribLast ? scribLast[1] : y);
+  ctx.lineTo(x, y);
+  ctx.stroke();
+  scribLast = [x, y];
+}
+function clearScribble() { const cv = $("#scribble"); cv.width = 0; scribLast = null; scribble(null); }
 
 // Fingers on the tablet: a ring per contact, grey when the pen or a palm has muted them.
 function drawFingers(ctx, f) {
@@ -683,11 +714,16 @@ $("#calStart").onclick = () => {
   api().start_calibration(calMode);
 };
 $("#calCancel").onclick = () => api().cancel_calibration();
+async function retap(i) {
+  if (!(await api().retap_target(i))) { toast("Connect the tablet first"); return; }
+  go("calibrate");
+  refresh();
+}
 
 function renderCalibration() {
   if (!S) return;
   const c = S.calibrating, mode = c ? c.mode : calMode;
-  const tg = targetsFor(mode), done = c ? c.index : -1;
+  const tg = targetsFor(mode), done = c ? c.index : -1, redo = c && c.redo != null;
   renderPositions($("#calPositions"));
   $("#posWarn").innerHTML = positionWarning();
   const tall = S.position === "portrait" || S.position === "portrait-flipped";
@@ -696,7 +732,7 @@ function renderCalibration() {
             `<rect x="${x0}" y="${y0}" width="${W}" height="${H}" fill="#e9e6dc"/>`;
   tg.forEach((t, i) => {
     const x = x0 + t.uv[0] * W, y = y0 + t.uv[1] * H;
-    const state = !c ? "idle" : i < done ? "done" : i === done ? "next" : "todo";
+    const state = !c ? "idle" : i === done ? "next" : (i < done || redo) ? "done" : "todo";
     const col = state === "done" ? "#2f9e6a" : state === "next" ? "#c0392b" : "#2a3a4c";
     if (state === "next") out += `<circle cx="${x}" cy="${y}" r="17" fill="none" stroke="${col}" stroke-width="2.5"><animate attributeName="r" values="14;19;14" dur="1.2s" repeatCount="indefinite"/></circle>`;
     if (state === "done") out += `<circle cx="${x}" cy="${y}" r="9" fill="${col}"/>`;
@@ -711,14 +747,16 @@ function renderCalibration() {
   $("#calStart").disabled = !S.connected;
   $("#calCancel").style.display = c ? "" : "none";
   const r = S.cal_result;
-  $("#calResult").innerHTML = r && !c ? `<div class="note ${r.ok ? "ok" : "warn"}"><svg><use href="#i-${r.ok ? "check" : "warn"}"/></svg><div>${esc(r.text)}</div></div>` : "";
+  $("#calResult").innerHTML = r && !c ? `<div class="note ${r.ok ? "ok" : "warn"}"><svg><use href="#i-${r.ok ? "check" : "warn"}"/></svg><div>${esc(r.text)}</div>` +
+    (r.retap != null && S.connected ? `<button class="btn" onclick="retap(${r.retap})">Tap target ${r.retap + 1} again</button>` : "") + "</div>" : "";
   const k = S.calibration;
   if (!k) $("#calSaved").textContent = S.position ? "None yet. Until you calibrate, the cursor follows the position you picked above, using the whole tablet." : "None yet. Pick how your tablet is lying above, then calibrate.";
   else {
     let html = `${k.points}-point calibration, tablet ${k.landscape ? "landscape" : "portrait"}, saved ${esc(k.date || "")}.`;
     if (k.residual_mm && k.residual_mm.length === 9) {
-      html += `<div class="muted mt">How far each tap was from a perfect fit (mm), already corrected for:</div><div class="resid">` +
-        k.residual_mm.map(v => `<div class="${v < 0.8 ? "good" : v < 2 ? "mid" : "bad"}">${v.toFixed(2)}</div>`).join("") + "</div>";
+      const can = S.connected && !c;
+      html += `<div class="muted mt">How far each tap was from a perfect fit (mm), already corrected for${can ? ". Click one to tap just that target again" : ""}:</div><div class="resid${can ? " tappable" : ""}">` +
+        k.residual_mm.map((v, i) => `<div class="${v < 0.8 ? "good" : v < 2 ? "mid" : "bad"}" ${can ? `onclick="retap(${i})" title="Tap target ${i + 1} again"` : ""}>${v.toFixed(2)}</div>`).join("") + "</div>";
     }
     $("#calSaved").innerHTML = html;
   }
@@ -1020,6 +1058,8 @@ const Panel = {
       sel.innerHTML = profs.map((p, i) => `<option value="${i}"${i === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
     }
     if (document.activeElement !== $("#profName")) $("#profName").value = (profs[cur] || {}).name || "";
+    if (document.activeElement !== $("#profApps")) $("#profApps").value = (profs[cur] || {}).apps || "";
+    $("#fgApp").textContent = S.fg_app ? `In front now: ${S.fg_app}.` : "";
     $("#profDel").disabled = profs.length < 2;
     const tm = (profs[cur] || {}).touch || "shortcuts";
     for (const b of $$("#profTouch button")) b.classList.toggle("on", b.dataset.v === tm);
@@ -1049,6 +1089,11 @@ const Panel = {
     for (const b of $$("#profTouch button")) b.onclick = () => {
       const p = profs();
       p[S.cfg.panel_profile].touch = b.dataset.v;
+      this.setProfiles(p);
+    };
+    $("#profApps").onchange = e => {
+      const p = profs();
+      p[S.cfg.panel_profile].apps = e.target.value;
       this.setProfiles(p);
     };
     $("#profName").onchange = e => {

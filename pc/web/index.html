@@ -208,6 +208,8 @@
         <div class="pane">
           <div class="pane-title">Pressure curve</div>
           <canvas class="curve" id="curve"></canvas>
+          <div class="row between mt"><span class="hint">Try a preset, then fine-tune below.</span>
+            <div class="seg" id="gammaPresets"><button data-v="0.7">Soft</button><button data-v="1">Linear</button><button data-v="1.6">Firm</button></div></div>
           <div class="range-row mt"><span>Response</span><input type="range" min="0.3" max="3" step="0.05" data-key="gamma" data-type="float"><span class="v" id="gammaV"></span></div>
           <div class="scale" style="margin-left:144px;margin-right:78px"><span>softer: light touch draws dark</span><span>firmer</span></div>
           <div class="range-row mt"><span>Ignore light touch</span><input type="range" min="0" max="0.3" step="0.01" data-key="threshold" data-type="float"><span class="v" id="threshV"></span></div>
@@ -244,6 +246,11 @@
             <p class="hint mts">Every report from the tablet's digitizer goes to Windows as it arrives; there is no fixed frame rate in between. Draw a few strokes to measure.</p>
           </div>
           <div class="note"><svg><use href="#i-info"/></svg><div>Photoshop: turn on <b>Pen Pressure</b> for brush size or opacity. Krita and Clip Studio: choose <b>Windows Ink</b> as the tablet input.</div></div>
+          <div class="pane">
+            <div class="pane-title">Try it here</div>
+            <div class="preview-wrap" style="height:260px"><canvas id="scribble"></canvas></div>
+            <div class="row between mts"><span class="hint">Line width follows the pressure your apps receive, so a change to the curve shows here at once. The eraser end rubs out.</span><button class="btn ghost" onclick="clearScribble()">Clear</button></div>
+          </div>
         </div>
       </div>
     </section>
@@ -350,6 +357,8 @@
               <label class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Fingers in this profile</div><div class="t2"><b>Shortcuts</b> turn gestures into keys for your drawing app. <b>Windows touch</b> makes the tablet a touchscreen: apps scroll with inertia, pinch and rotate by themselves. The pen still mutes fingers while it's near.</div></div>
               <div class="seg" id="profTouch"><button data-v="shortcuts">Shortcuts</button><button data-v="windows">Windows touch</button></div></div>
+            <div class="opt" style="display:block"><div class="tx"><div class="t1">Use this profile in</div><div class="t2">Program names, comma separated. When one of them comes to the front, the tablet switches to this profile by itself. <span id="fgApp"></span></div></div>
+              <input class="input mono mts" id="profApps" placeholder="e.g. photoshop, krita"></div>
             <div class="opt"><div class="tx"><div class="t1">Rotate key</div><div class="t2">Five fingers twisted rotate the canvas: this key is held while the app drags round the window centre. Photoshop: <code>r</code>, Krita / Clip Studio: <code>shift+space</code></div></div>
               <input class="input mono" data-key="rotate_keys" style="width:130px"></div>
             <div class="opt"><div class="tx"><div class="t1">Swipe step</div><div class="t2">How far a 3-finger swipe goes for each undo or redo; drag back to take steps back</div></div>

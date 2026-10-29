@@ -165,6 +165,9 @@ class Api:
     def cancel_calibration(self):
         self._engine.cancel_calibration()
 
+    def retap_target(self, i):
+        return self._engine.retap_target(int(i))
+
     def reset_peak(self):
         self._engine.reset_peak()
 
