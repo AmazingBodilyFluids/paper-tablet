@@ -149,7 +149,10 @@
       <div class="pane mt2">
           <div class="pane-title">Tablet, as it sits on your desk</div>
           <div class="preview-wrap drag" style="height:400px" id="mapWrap"><canvas id="mapPreview"></canvas></div>
-          <div class="legend mts"><span><i style="background:var(--accent2-b)"></i>reaches your display</span><span><i style="border:1.5px dashed var(--accent)"></i>active area: drag to change</span></div>
+          <div class="row between mts">
+            <div class="legend"><span><i style="background:var(--accent2-b)"></i>reaches your display</span><span><i style="border:1.5px dashed var(--accent)"></i>active area</span><span><i style="background:rgba(0,0,0,0.55)"></i>pen mask</span></div>
+            <div class="row"><span class="hint" id="dragHint"></span><div class="seg" id="dragWhat"><button data-v="area" class="on">Drag sets the area</button><button data-v="mask">Drag moves the mask</button></div></div>
+          </div>
         </div>
       <div class="grid2 mt2">
         <div class="stack">
@@ -182,7 +185,7 @@
               <label class="switch"><input type="checkbox" data-key="mask_on"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Grey areas</div><div class="t2" id="maskModeHint"></div></div>
               <div class="seg" data-key="mask_mode"><button data-v="fade">Fade</button><button data-v="gate">Firmer press</button></div></div>
-            <div class="opt"><div class="tx"><div class="t1">Make it from an image</div><div class="t2">Read in greyscale and fitted to the tablet screen: black masks, white stays open.</div></div>
+            <div class="opt"><div class="tx"><div class="t1">Make it from an image</div><div class="t2">Read in greyscale: black masks, white stays open. Place it on the picture above with <i>Drag moves the mask</i>; the wheel zooms it.</div></div>
               <button class="btn" onclick="$('#maskFile').click()">Choose…</button><input type="file" id="maskFile" accept="image/*" hidden onchange="maskFromImage(this)"></div>
             <div class="opt"><div class="tx"><div class="t1">Paint it on the tablet</div><div class="t2">While on, the pen paints full shading, the eraser end clears it, and one finger drags the whole mask. Windows gets no pen meanwhile.</div></div>
               <div class="row"><button class="btn ghost" onclick="maskOp('invert')">Invert</button><button class="btn ghost" onclick="maskOp('clear')">Clear</button><label class="switch"><input type="checkbox" data-key="mask_edit"><span class="track"></span></label></div></div>
