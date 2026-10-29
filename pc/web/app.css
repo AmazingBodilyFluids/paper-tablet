@@ -305,7 +305,7 @@ ol.steps li .sub { color:var(--dim2); font-size:12px; margin-top:2px; }
 
 .prof-row { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
 .prof-row select { flex:1 1 140px; min-width:120px; }
-.prof-row #profName { flex:1 1 140px; min-width:110px; }
+.prof-row #profName, .prof-row #maskName { flex:1 1 140px; min-width:110px; }
 .pm-prof { position:absolute; border:solid #000; background:#fff; box-sizing:border-box; display:flex;
   align-items:center; justify-content:center; font-weight:700; color:#000; }
 .pm-prof span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }

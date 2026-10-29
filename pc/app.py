@@ -144,6 +144,18 @@ class Api:
     def mask_op(self, name):
         self._engine.mask_op(name)
 
+    def new_mask(self, name=None):
+        return self._engine.new_mask(name)
+
+    def pick_mask(self, mid):
+        self._engine.pick_mask(mid)
+
+    def rename_mask(self, mid, name):
+        self._engine.rename_mask(mid, name)
+
+    def delete_mask(self, mid):
+        self._engine.delete_mask(mid)
+
     def set_position(self, key):
         self._engine.set_position(key)
 

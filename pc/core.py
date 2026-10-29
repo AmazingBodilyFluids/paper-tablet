@@ -61,11 +61,16 @@ DEFAULTS = {
     # down, "gate" needs a firmer press). Painted on the tablet in edit mode or made from an image.
     "mask": "", "mask_on": False, "mask_edit": False, "mask_mode": "fade",
     "mask_contrast": 1.0,   # applied over the stored mask: >1 pushes greys towards black / white
+    # the mask library: [{"id", "name", "contrast", "mode"}], one file each (penmask-<id>.bin); the
+    # active one is what the pen and the tablet use (mask_contrast / mask_mode mirror its settings),
+    # and the tablet lists them in a strip on the side away from the shortcut panel
+    "masks": None, "mask_active": "", "mask_panel": True,
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
     "taps": None,           # tap gestures, filled from DEFAULT_TAPS below
 }
 PANEL_PX = 302  # panel width on the tablet, in panel pixels (about 34 mm)
+STRIP_PX = 200  # the mask strip, opposite the panel (about 22 mm)
 TAB_PX = 84     # the fold tab in the panel's top corner, also all that's left when folded
 PANEL_SLOTS = 16  # 8 rows of 2, as drawn on the tablet
 # kinds: shortcut (tap the keys), hold (keys down while held / locked), pen, snap, clear, none
@@ -299,7 +304,8 @@ class Companion:
         self.chan = None
         self.tab = None
         self.trace_sent = None  # (path, mtime, size) of the image on the tablet
-        self.mask_sent = None   # version of the pen mask on the tablet
+        self.mask_sent = {}     # mask id -> (version, path) of its image on the tablet
+        self.thumb_sent = {}    # mask id -> (version, path) of its thumbnail
         self.log = collections.deque(maxlen=300)
         self.started_at = 0
 
@@ -342,7 +348,7 @@ class Companion:
         if self.running or time.time() - self.started_at < 4:
             return  # one hand-over at a time: overlapping sessions fight over the panel
         self.started_at = time.time()
-        self.tab, self.trace_sent, self.mask_sent = tab, None, None
+        self.tab, self.trace_sent, self.mask_sent, self.thumb_sent = tab, None, {}, {}
         src = os.path.join(rt.HERE, "..", "tablet", "companion")
         tab.run(f"mkdir -p {self.REMOTE}")
         for name in self.FILES:
@@ -572,13 +578,7 @@ class Engine:
         self.last_action = None
         self.touch = None       # the latest finger report from the tablet, for the live view
         self.touch_out = None   # WindowsTouch, made when a profile first uses Windows touch
-        mask_path = os.path.join(os.path.dirname(rt.CONFIG_PATH), "penmask.bin")
-        fresh = not os.path.exists(mask_path)
-        self.pmask = penmask.Mask(mask_path, self.cfg.get("mask_contrast"))
-        old = penmask.legacy(self.cfg.get("mask"))
-        if old is not None and fresh:
-            self.pmask.set_raw(old)
-        self.cfg["mask"] = ""
+        self.load_masks()
         self.rate = RateMeter()
         self.mapper = None
         self.refresh_mapper()
@@ -633,7 +633,8 @@ class Engine:
             "snap_last": self.snap_last, "last_action": self.last_action, "held_keys": sorted(self.keys.held),
             "view": self.view_size(), "panel_px": PANEL_PX, "tab_px": TAB_PX,
             "key_names": sorted(keys.VK), "key_labels": keys.LABEL, "default_buttons": DEFAULT_BUTTONS,
-            "pen_rate": self.rate.last, "mask_ver": self.pmask.ver, "mask_pct": round(100 * self.pmask.coverage()), "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
+            "pen_rate": self.rate.last, "mask_ver": self.pmask.ver, "mask_pct": round(100 * self.pmask.coverage()),
+            "strip_px": STRIP_PX, "strip_side": self.strip_side(), "strip_shown": bool(self.strip_frac()), "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
         }
 
     def live(self):
@@ -700,19 +701,24 @@ class Engine:
             if key == "mask_mode" and val not in MASK_MODES:
                 val = "fade"
             self.cfg[key] = val
+            if key in ("mask_contrast", "mask_mode"):
+                entry = self.mask_entry()
+                if entry is not None:
+                    entry["contrast" if key == "mask_contrast" else "mode"] = val
             if key == "mask_contrast":
                 self.pmask.set_contrast(val)
             self.refresh_mapper()
             self.save()
-        if key in ("companion_rot", "panel", "panel_open"):
+        if key in ("companion_rot", "panel", "panel_open", "mask_panel"):
             self.refresh_mapper()
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
                    "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
                    "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
-                   "trace_adjust", "light", "mask_on", "mask_edit"):
+                   "trace_adjust", "light", "mask_on", "mask_edit", "mask_panel"):
             self.sync_companion()
         if key == "mask_contrast":
             self.push_mask()
+            self.push_strip()
         if key == "light" and self.companion.running:
             threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
             self.companion.send("toast Front light: " + ("full" if val else "back to your level"))
@@ -736,6 +742,16 @@ class Engine:
             return 0.0
         return PANEL_PX / self.view_size()[0]
 
+    def strip_side(self):
+        return "left" if self.cfg.get("panel") == "right" else "right"
+
+    def strip_frac(self):
+        """Share of the tablet the mask strip takes (opposite the panel), or 0."""
+        if (not self.cfg.get("mask_panel", True) or not self.cfg.get("masks") or not self.companion.running
+                or self.cal is not None):
+            return 0.0
+        return STRIP_PX / self.view_size()[0]
+
     def effective_area(self):
         a = list(self.cfg["area"])
         f = self.panel_frac()
@@ -743,6 +759,11 @@ class Engine:
             a[2] = min(a[2], 1 - f)
         elif f:
             a[0] = max(a[0], f)
+        g = self.strip_frac()
+        if g and self.strip_side() == "right":
+            a[2] = min(a[2], 1 - g)
+        elif g:
+            a[0] = max(a[0], g)
         if a[2] - a[0] < 0.1:
             a = list(self.cfg["area"])
         return a
@@ -761,36 +782,167 @@ class Engine:
     def masked(self, s):
         return self.mask_level(s) >= penmask.FULL
 
-    # ---- pen mask changes, from the page or the tablet; each goes to the tablet as an image
+    # ---- the mask library
+    def mask_path(self, mid):
+        return os.path.join(os.path.dirname(rt.CONFIG_PATH), f"penmask-{mid}.bin")
+
+    def load_masks(self):
+        """Every mask's file; carries over the single mask of earlier versions as "Mask 1"."""
+        masks = [dict(m) for m in (self.cfg.get("masks") or []) if isinstance(m, dict) and m.get("id")]
+        folder = os.path.dirname(rt.CONFIG_PATH)
+        single, old = os.path.join(folder, "penmask.bin"), penmask.legacy(self.cfg.get("mask"))
+        from_hex = None
+        if not masks and (os.path.exists(single) or old is not None):
+            masks = [{"id": "m1", "name": "Mask 1", "contrast": float(self.cfg.get("mask_contrast") or 1),
+                      "mode": self.cfg.get("mask_mode", "fade")}]
+            if os.path.exists(single):
+                os.replace(single, self.mask_path("m1"))
+            else:
+                from_hex = old
+            self.cfg["mask_active"] = "m1"
+        self.cfg["mask"] = ""
+        self.cfg["masks"] = masks
+        self.masks = {m["id"]: penmask.Mask(self.mask_path(m["id"]), m.get("contrast", 1)) for m in masks}
+        if from_hex is not None:
+            self.masks["m1"].set_raw(from_hex)
+        self.blank = penmask.Mask()
+        self.use_mask(self.cfg.get("mask_active", ""))
+
+    def mask_entry(self, mid=None):
+        mid = self.cfg.get("mask_active") if mid is None else mid
+        return next((m for m in self.cfg["masks"] if m["id"] == mid), None)
+
+    def use_mask(self, mid):
+        """Make a mask the active one (its settings into mask_contrast / mask_mode), or none."""
+        entry = self.mask_entry(mid)
+        if entry is None:
+            mid = ""
+        self.cfg["mask_active"] = mid
+        self.pmask = self.masks[mid] if mid else self.blank
+        if entry is not None:
+            self.cfg["mask_contrast"] = float(entry.get("contrast", 1))
+            self.cfg["mask_mode"] = entry.get("mode", "fade") if entry.get("mode") in MASK_MODES else "fade"
+
+    def pick_mask(self, mid):
+        """Switch masks (from the page or the tablet strip); "" = none, which turns the mask off."""
+        with self.lock:
+            self.use_mask(mid)
+            self.cfg["mask_on"] = bool(self.cfg["mask_active"])
+            self.save()
+        self.push_mask()
+        self.sync_companion()
+        self.changed()
+
+    def new_mask(self, name=None):
+        with self.lock:
+            n = 1
+            while any(m["id"] == f"m{n}" for m in self.cfg["masks"]):
+                n += 1
+            mid = f"m{n}"
+            names = {m["name"] for m in self.cfg["masks"]}
+            k = n
+            while (name or f"Mask {k}") in names:
+                k += 1
+            entry = {"id": mid, "name": (name or f"Mask {k}")[:24], "contrast": 1.0, "mode": "fade"}
+            self.cfg["masks"] = self.cfg["masks"] + [entry]
+            self.masks[mid] = penmask.Mask(self.mask_path(mid))
+            self.masks[mid].set_raw(bytes(penmask.N * penmask.N))  # a fresh file, even over an old one
+        self.refresh_mapper()  # the strip may have just appeared
+        self.pick_mask(mid)
+        return mid
+
+    def rename_mask(self, mid, name):
+        with self.lock:
+            entry = self.mask_entry(mid)
+            if entry is None or not str(name).strip():
+                return
+            entry["name"] = str(name).strip()[:24]
+            self.save()
+        self.sync_companion()
+        self.changed()
+
+    def delete_mask(self, mid):
+        with self.lock:
+            if self.mask_entry(mid) is None:
+                return
+            self.cfg["masks"] = [m for m in self.cfg["masks"] if m["id"] != mid]
+            self.masks.pop(mid, None)
+            try:
+                os.remove(self.mask_path(mid))
+            except (OSError, TypeError):
+                pass
+            nxt = self.cfg["masks"][0]["id"] if self.cfg["masks"] and self.cfg["mask_active"] == mid else None
+        self.refresh_mapper()
+        if nxt is not None or self.cfg["mask_active"] == mid:
+            self.pick_mask(nxt or "")
+        else:
+            self.save()
+            self.sync_companion()
+            self.changed()
+
+    def editable_mask(self):
+        """The active mask, made first if there is none yet (painting or importing means wanting one)."""
+        if not self.cfg.get("mask_active"):
+            self.new_mask()
+        return self.pmask
+
+    # ---- changes to the active mask, from the page or the tablet; each goes to the tablet as an image
     def set_mask(self, b64):
-        self.pmask.set_b64(b64)
+        self.editable_mask().set_b64(b64)
         self.mask_changed()
         return self.pmask.ver
 
     def mask_op(self, name):
-        self.pmask.op(name)
+        self.editable_mask().op(name)
         self.mask_changed()
 
     def mask_changed(self):
         if not self.cfg.get("mask_on"):
             self.set("mask_on", True)  # making a mask means wanting it
         self.push_mask()
+        self.push_strip()
         self.changed()
 
     def push_mask(self):
-        """The mask as an image on the tablet (black, alpha = how masked, contrast applied)."""
+        """The active mask as an image on the tablet (black, alpha = how masked, contrast applied).
+        Each mask's image stays there, so switching back to one needs no upload."""
         c = self.companion
-        if not c.running or not c.tab or c.mask_sent == self.pmask.ver:
+        if not c.running or not c.tab:
             return
-        ver = self.pmask.ver
-        remote = f"{c.REMOTE}/mask{ver % 2}.png"
-        try:
-            c.tab.run(f"cat > {remote}", self.pmask.png())
-        except Exception as ex:
-            c.send(f"toast Mask not sent: {ex}")
+        mid, m = self.cfg.get("mask_active", ""), self.pmask
+        if not mid:
+            c.send("maskimg")
             return
-        c.mask_sent = ver
-        c.send(f"maskimg {remote}")
+        sent = c.mask_sent.get(mid)
+        if not sent or sent[0] != m.ver:
+            remote = f"{c.REMOTE}/mask-{mid}-{m.ver}.png"
+            try:
+                c.tab.run(f"rm -f {c.REMOTE}/mask-{mid}-*.png; cat > {remote}", m.png())
+            except Exception as ex:
+                c.send(f"toast Mask not sent: {ex}")
+                return
+            sent = c.mask_sent[mid] = (m.ver, remote)
+        c.send(f"maskimg {sent[1]}")
+
+    def push_strip(self):
+        """The tablet's mask strip: which side, and a thumbnail and name per mask."""
+        c = self.companion
+        if not c.running or not c.tab:
+            return
+        f = self.strip_frac()
+        c.send(f"maskstrip {int(bool(f))} {self.strip_side()} {f:.4f}")
+        out = []
+        for e in self.cfg["masks"]:
+            m, sent = self.masks[e["id"]], c.thumb_sent.get(e["id"])
+            if not sent or sent[0] != m.ver:
+                remote = f"{c.REMOTE}/thumb-{e['id']}-{m.ver}.png"
+                try:
+                    c.tab.run(f"rm -f {c.REMOTE}/thumb-{e['id']}-*.png; cat > {remote}", m.thumb())
+                except Exception:
+                    remote = ""
+                sent = c.thumb_sent[e["id"]] = (m.ver, remote)
+            out.append({"id": e["id"], "name": e["name"], "thumb": sent[1]})
+        c.send("masks " + json.dumps({"active": self.cfg.get("mask_active", ""), "list": out}, separators=(",", ":")))
 
     def mask_pressure(self, s, level):
         """The pen over a partly masked spot. fade: pressure scaled down by the shade (a mid grey
@@ -808,8 +960,15 @@ class Engine:
         return dataclasses.replace(s, pressure=int(round(lo + n * span)))
 
     def over_panel(self, s):
-        """Is the pen above the tablet's side panel? Then it presses buttons there, not in Windows."""
-        if not self.panel_shown() or not s.in_range or not self.mapper:
+        """Is the pen above the tablet's side panel or mask strip? Then it works those, not Windows."""
+        if not s.in_range or not self.mapper:
+            return False
+        g = self.strip_frac()
+        if g:
+            p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
+            if (p > 1 - g) if self.strip_side() == "right" else (p < g):
+                return True
+        if not self.panel_shown():
             return False
         p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
         right = self.cfg.get("panel") == "right"
@@ -891,12 +1050,14 @@ class Engine:
                 self.cfg["trace_x"], self.cfg["trace_y"] = float(parts[1]), float(parts[2])
                 self.cfg["trace_scale"] = max(0.05, min(20.0, float(parts[3])))
                 self.save()
+        elif name == "maskpick" and len(parts) == 2:  # a tap in the tablet's mask strip
+            self.pick_mask("" if parts[1] == "none" else parts[1])
         elif name == "maskpaint" and len(parts) >= 6:  # maskpaint <0|255> <rx> <ry> p q p q ...
             v = [float(x) for x in parts[1:]]
-            self.pmask.paint(255 if v[0] else 0, v[1], v[2], list(zip(v[3::2], v[4::2])))
+            self.editable_mask().paint(255 if v[0] else 0, v[1], v[2], list(zip(v[3::2], v[4::2])))
             self.mask_changed()
         elif name == "maskmove" and len(parts) == 3:  # one finger dragged it, by a fraction of the screen
-            self.pmask.shift(float(parts[1]), float(parts[2]))
+            self.editable_mask().shift(float(parts[1]), float(parts[2]))
             self.mask_changed()
         elif name == "maskedit":
             self.set("mask_edit", not self.cfg.get("mask_edit"))
@@ -1239,6 +1400,7 @@ class Engine:
         c.send(f"traceadjust {int(bool(self.cfg.get('trace_adjust')) and bool(remote))}")
         c.send(f"mask {int(bool(self.cfg.get('mask_on')))} {int(bool(self.cfg.get('mask_edit')))}")
         self.push_mask()
+        self.push_strip()
         c.send("status Connected to PC. Pen " + ("on" if self.output_on else "off")
                + (", shapes on" if self.cfg.get("snap") else ""))
         if self.cal is not None:

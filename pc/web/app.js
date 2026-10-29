@@ -128,6 +128,7 @@ function render() {
   $("#traceName").title = tf;
   $("#maskConV").textContent = "×" + (S.cfg.mask_contrast || 1);
   $("#traceDel").disabled = !tf;
+  renderMasks();
   $("#maskInfo").textContent = S.mask_pct ? `${S.mask_pct}% of the screen is masked.` : "Nothing masked yet.";
   $("#maskModeHint").textContent = S.cfg.mask_mode === "gate"
     ? "The darker the grey, the harder you press before ink starts. Black: no pen."
@@ -539,7 +540,12 @@ for (const b of $$("#dragWhat button")) b.onclick = () => {
     return clamp ? [Math.min(1, Math.max(0, p)), Math.min(1, Math.max(0, q))] : [p, q];
   };
   const box = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
+  const onScreen = e => { const [p, q] = frac(e, false); return p >= 0 && p <= 1 && q >= 0 && q <= 1; };
+  cv.addEventListener("mousemove", e => {
+    if (!start) cv.style.cursor = onScreen(e) ? (dragWhat === "mask" ? "move" : "crosshair") : "default";
+  });
   cv.addEventListener("mousedown", e => {
+    if (!onScreen(e)) return;  // only the screen itself, not the frame or the space beside it
     if (dragWhat === "mask") { const s = maskSource(); if (!s) return; start = frac(e, false); m0 = [s.ox, s.oy]; }
     else start = frac(e);
   });
@@ -564,7 +570,7 @@ for (const b of $$("#dragWhat button")) b.onclick = () => {
     if (a[2] - a[0] >= 0.05 && a[3] - a[1] >= 0.05) setArea(a); else drawTablet(cv);
   });
   cv.addEventListener("wheel", e => {
-    if (dragWhat !== "mask") return;
+    if (dragWhat !== "mask" || !onScreen(e)) return;  // elsewhere the wheel scrolls the page
     e.preventDefault();
     const s = maskSource();
     if (!s) return;
@@ -1247,6 +1253,37 @@ async function pickTrace() {
 async function resetTrace() {
   for (const [k, v] of [["trace_x", 0], ["trace_y", 0], ["trace_scale", 1]]) await setKey(k, v);
   refresh();
+}
+
+// the mask library: pick, name, add, delete (the tablet's strip switches between the same masks)
+function renderMasks() {
+  const ms = S.cfg.masks || [], cur = S.cfg.mask_active || "", sel = $("#maskSel");
+  const sig = JSON.stringify([ms.map(m => [m.id, m.name]), cur]);
+  if (sel.dataset.sig !== sig && document.activeElement !== sel) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = `<option value=""${cur ? "" : " selected"}>None</option>` +
+      ms.map(m => `<option value="${esc(m.id)}"${m.id === cur ? " selected" : ""}>${esc(m.name)}</option>`).join("");
+  }
+  const m = ms.find(x => x.id === cur);
+  if (document.activeElement !== $("#maskName")) $("#maskName").value = m ? m.name : "";
+  $("#maskName").disabled = $("#maskDel").disabled = !m;
+}
+$("#maskSel").onchange = async e => { await api().pick_mask(e.target.value); maskSrc = null; refresh(); };
+$("#maskName").onchange = async e => { if (S.cfg.mask_active) await api().rename_mask(S.cfg.mask_active, e.target.value); refresh(); };
+$("#maskNew").onclick = async () => {
+  await api().new_mask(null); maskSrc = null; await refresh();
+  $("#maskName").focus(); $("#maskName").select();
+};
+{
+  let armed = 0;
+  $("#maskDel").onclick = async () => {  // two clicks, so a stray one can't lose a mask
+    const b = $("#maskDel");
+    if (Date.now() - armed > 3000) { armed = Date.now(); b.textContent = "Sure?"; setTimeout(() => b.textContent = "Delete", 3000); return; }
+    armed = 0; b.textContent = "Delete";
+    const m = (S.cfg.masks || []).find(x => x.id === S.cfg.mask_active);
+    await api().delete_mask(S.cfg.mask_active); maskSrc = null; refresh();
+    if (m) toast(`Deleted "${m.name}".`);
+  };
 }
 
 async function maskOp(op) {
