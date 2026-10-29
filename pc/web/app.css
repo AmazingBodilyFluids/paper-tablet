@@ -142,6 +142,7 @@ h2 { font-size:15px; font-weight:500; color:var(--text); }
 .btn.acc { color:var(--bg); background:var(--accent); border-color:var(--accent); }
 .btn.acc:hover { background:color-mix(in srgb, var(--accent) 86%, #fff); }
 .btn.ghost { background:transparent; }
+.btn.on { color:var(--accent); border-color:var(--accent-b); background:var(--accent-d); }
 .btn.blue { color:var(--accent2); border-color:var(--accent2-b); background:var(--accent2-d); }
 .btn:disabled { opacity:0.4; cursor:default; }
 .btn svg { width:14px; height:14px; stroke:currentColor; fill:none; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
