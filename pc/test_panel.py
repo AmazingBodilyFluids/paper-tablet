@@ -461,3 +461,72 @@ class ReportRate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WiFi(unittest.TestCase):
+    class Tab:
+        def __init__(self, ip="192.168.0.100"):
+            self.cmds, self.ip = [], ip
+
+        def run(self, cmd):
+            self.cmds.append(cmd)
+            if cmd.startswith("ip -4"):
+                return 0, (f"3: wlan0    inet {self.ip}/24 brd 192.168.0.255 scope global wlan0\n" if self.ip else "").encode(), b""
+            return 0, b"", b""
+
+        def server_key(self):
+            return "ssh-ed25519 AAAAkey"
+
+    def engine(self, via="usb", connected=True, **cfg):
+        e = bare_engine(cfg)
+        e.lock = threading.RLock()
+        e.save = lambda: None
+        e.via = via
+        e.worker = types.SimpleNamespace(tab=self.Tab(), connected=connected)
+        e.disconnect = lambda: None
+        real, core.port_open = core.port_open, lambda *a, **k: True
+        self.addCleanup(setattr, core, "port_open", real)
+        return e
+
+    def test_reads_the_wlan_address(self):
+        self.assertEqual(core.Engine.wlan_ip(b"3: wlan0    inet 10.0.0.7/24 brd 10.0.0.255 scope global wlan0"), "10.0.0.7")
+        self.assertEqual(core.Engine.wlan_ip(b""), "")
+
+    def test_switching_on_needs_the_cable(self):
+        e = self.engine(via="wifi")
+        self.assertFalse(e.set_wifi(True)["ok"])
+        e = self.engine(connected=False)
+        self.assertFalse(e.set_wifi(True)["ok"])
+
+    def test_switching_on_pins_the_key_and_learns_the_address(self):
+        e = self.engine()
+        r = e.set_wifi(True)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((e.cfg["wifi"], e.cfg["wifi_host"], e.cfg["host_key"]), (True, "192.168.0.100", "ssh-ed25519 AAAAkey"))
+        self.assertIn("rm-ssh-over-wlan on", e.worker.tab.cmds[0])
+
+    def test_no_wifi_on_the_tablet(self):
+        e = self.engine()
+        e.worker.tab.ip = ""
+        self.assertFalse(e.set_wifi(True)["ok"])
+        self.assertFalse(e.cfg["wifi"])
+
+    def test_switching_off_while_away_waits_for_the_cable(self):
+        e = self.engine(connected=False, wifi=True, wifi_host="192.168.0.100")
+        e.set_wifi(False)
+        self.assertEqual((e.cfg["wifi"], e.cfg["wifi_off_pending"]), (False, True))
+        tab = self.Tab()
+        e.cable_chores(tab)
+        self.assertIn("rm-ssh-over-wlan off", tab.cmds[0])
+        self.assertFalse(e.cfg["wifi_off_pending"])
+
+    def test_cable_keeps_the_address_current(self):
+        e = self.engine(wifi=True, wifi_host="192.168.0.50")
+        e.cable_chores(self.Tab("192.168.0.77"))
+        self.assertEqual(e.cfg["wifi_host"], "192.168.0.77")
+        self.assertEqual(e.cfg["host_key"], "ssh-ed25519 AAAAkey")
+
+    def test_wifi_login_needs_a_pinned_key(self):
+        e = self.engine(via="wifi", connected=False, wifi=True, wifi_host="192.168.0.100")
+        with self.assertRaises(PermissionError):
+            e.open_tablet()

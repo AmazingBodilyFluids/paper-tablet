@@ -15,6 +15,7 @@ Commands:
   python rmtablet.py run         drive the Windows pen (default command)
 """
 import argparse
+import base64
 import ctypes
 import getpass
 import json
@@ -44,10 +45,19 @@ BTN_TOOL_PEN, BTN_TOOL_RUBBER, BTN_TOUCH, BTN_STYLUS = 0x140, 0x141, 0x14A, 0x14
 class Tablet:
     """SSH session to the tablet plus the rmpp-pen helper."""
 
-    def __init__(self, host, user, password, port=22, keyfile=None):
+    def __init__(self, host, user, password, port=22, keyfile=None, host_key=None):
+        """host_key ("type base64", as server_key() gives it): only log in to the tablet with that
+        SSH host key (for Wi-Fi, where another machine could answer at the address)."""
         import paramiko  # imported lazily so the unit tests run without it
+        self.host = host
         self.client = paramiko.SSHClient()
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if host_key:
+            kind, b64 = host_key.split()[:2]
+            self.client.get_host_keys().add(host if port == 22 else f"[{host}]:{port}", kind,
+                                            paramiko.PKey.from_type_string(kind, base64.b64decode(b64)))
+            self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.client.connect(host, port=port, username=user, password=password,
                             key_filename=keyfile, look_for_keys=keyfile is None and password is None,
                             allow_agent=password is None, timeout=8, compress=False)
@@ -105,6 +115,24 @@ class Tablet:
 
         threading.Thread(target=keepalive, daemon=True).start()
         return chan
+
+    def server_key(self):
+        k = self.client.get_transport().get_remote_server_key()
+        return f"{k.get_name()} {k.get_base64()}"
+
+    def alive(self, timeout):
+        """True if the tablet answers an SSH round trip within `timeout` seconds."""
+        done = threading.Event()
+
+        def ping():
+            try:
+                self.client.get_transport().global_request("keepalive@paper-tablet", wait=True)
+            except Exception:
+                return
+            done.set()
+
+        threading.Thread(target=ping, daemon=True).start()
+        return done.wait(timeout)
 
     def close(self):
         self.client.close()

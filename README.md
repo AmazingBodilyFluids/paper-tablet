@@ -40,6 +40,9 @@ handle undo, redo, pan and zoom.
   image, read in greyscale, then place and zoom it on the Screen area picture, with a contrast setting and an
   Invert toggle on top. Keep as many named masks as you like and switch between them, or invert the one in use,
   from a corner tab on the tablet, on the side away from the shortcut panel.
+- **Wi-Fi.** Plugged in once, the app can switch on reMarkable's own SSH over Wi-Fi and from then on find the
+  tablet on your network when the cable is out (Settings). It only logs in to the tablet whose key it saw on the
+  cable. The cable stays the faster link.
 - **Finger gestures:**
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.

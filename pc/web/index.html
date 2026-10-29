@@ -375,6 +375,9 @@
             <div class="field"><span class="lbl">User</span><input class="input mono" data-key="user"></div>
             <div class="field"><span class="lbl">Key file (optional)</span><input class="input mono" data-key="key" placeholder="the app's own key is used by default"></div>
             <div class="row"><button class="btn" id="btnConnect">Connect now</button><button class="btn ghost" id="btnDisconnect">Disconnect</button></div>
+            <div class="opt"><div class="tx"><div class="t1">Connect over Wi-Fi too</div><div class="t2" id="wifiInfo"></div></div>
+              <label class="switch"><input type="checkbox" id="wifiOn"><span class="track"></span></label></div>
+            <p class="hint">This switches on reMarkable's own SSH over Wi-Fi on the tablet (with the cable plugged in), so the tablet's login is reachable on your network. The app only logs in with its key and only to this tablet, but the tablet's password works there too, so use it on networks you trust, and switch it off elsewhere. Wi-Fi adds a little lag compared with the cable.</p>
           </div>
         </div>
         <div class="pane">

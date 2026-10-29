@@ -36,7 +36,11 @@ TARGET_NAMES = ["top-left", "top-middle", "top-right", "middle-left", "centre", 
 CORNER_NAMES = ["top-left", "top-right", "bottom-right", "bottom-left"]
 DEFAULTS = {
     "host": "10.11.99.1", "user": "root", "key": "",
-    "model": "ferrari",     # the last reMarkable model seen (devices.py), so the pages fit it before it connects "monitor": 0, "fit": "crop", "edge_lift": True,
+    "model": "ferrari",     # the last reMarkable model seen (devices.py), so the pages fit it before it connects
+    # Wi-Fi: SSH over Wi-Fi is switched on over the cable (rm-ssh-over-wlan); the tablet's Wi-Fi
+    # address is refreshed on every cable connection, and its SSH host key is pinned then, so a
+    # Wi-Fi login only goes to the tablet that was plugged in
+    "wifi": False, "wifi_host": "", "host_key": "", "wifi_off_pending": False, "monitor": 0, "fit": "crop", "edge_lift": True,
     "orientation": "as-calibrated", "area": [0.0, 0.0, 1.0, 1.0], "gamma": 1.0, "threshold": 0.0,
     "tilt": True, "grab": False, "feedback": "indirect", "companion_rot": "Match calibration",
     # plug-and-play
@@ -450,15 +454,22 @@ class Worker(threading.Thread):
             parser = rt.EvdevParser(rt.event_format(info), pen)
             was_down = False
             grabbed = None
-            usb = e.cfg["host"].startswith("10.11.99.")
-            checked = time.time()
+            host = self.tab.host
+            usb = host.startswith("10.11.99.")
+            checked = pinged = time.time()
             while not self.stop_flag.is_set():
                 if time.time() - checked > 1.0:
                     # A pulled cable never closes the TCP stream on this side; notice it from
                     # the network adapter going away instead of waiting for SSH timeouts.
                     checked = time.time()
-                    if (usb and not usb_link(e.cfg["host"])) or not self.tab.client.get_transport().is_active():
+                    if (usb and not usb_link(host)) or not self.tab.client.get_transport().is_active():
                         break
+                    # Over Wi-Fi a dropped network (or a sleeping tablet) leaves the TCP stream
+                    # hanging for minutes; an SSH round trip every few seconds notices it.
+                    if not usb and time.time() - pinged > 3:
+                        pinged = time.time()
+                        if not self.tab.alive(4):
+                            break
                 want = e.want_grab()
                 if want != grabbed:  # (re)open the stream with or without the exclusive grab
                     if self.chan:
@@ -496,7 +507,7 @@ class Worker(threading.Thread):
                             e.on_tap((s.x, s.y))
                     elif pen_out is not None:
                         level = e.mask_level(s)
-                        if e.over_panel(s) or level >= 15:
+                        if e.over_panel(s) or level >= penmask.FULL:
                             s = rt.PenState()  # over the tablet's buttons or masked: out of range for Windows
                         elif level:
                             s = e.mask_pressure(s, level)
@@ -574,6 +585,9 @@ class Engine:
         self.status = ("idle", "Waiting for the tablet")
         self.link = False
         self.ssh_port = False
+        self.via = ""           # how the tablet answers: "usb", "wifi" or not at all
+        self.wifi_knock = 0     # when to next knock at its Wi-Fi address
+        self.wifi_up = False
         self.manual_off = False  # user pressed Disconnect: don't auto-connect until replugged
         self.retry_at = 0
         self.peak = 0
@@ -626,7 +640,7 @@ class Engine:
                            "targets": self.cal_targets(self.cal["mode"])}
         return {
             "cfg": self.cfg, "touch_mode": self.touch_mode(), "status": {"kind": self.status[0], "text": self.status[1]},
-            "link": self.link, "ssh": self.ssh_port, "connected": self.connected,
+            "link": self.link, "ssh": self.ssh_port, "connected": self.connected, "via": self.via,
             "output": self.output_on, "screen": self.companion.running,
             "device": self.pen and {"name": self.pen["name"], "kernel": self.info.get("release", ""),
                                     "tilt": "TILT_X" in self.pen["abs"]},
@@ -1229,6 +1243,14 @@ class Engine:
                 # can only be found by knocking.
                 link = usb_link(host) if host.startswith("10.11.99.") else port_open(host, 22)
                 ssh = link and port_open(host, 22)
+                self.via = "usb" if ssh else ""
+                if not ssh and self.cfg.get("wifi") and self.cfg.get("wifi_host"):
+                    if time.time() >= self.wifi_knock:  # each knock starts an SSH server process there
+                        self.wifi_knock = time.time() + 3
+                        self.wifi_up = port_open(self.cfg["wifi_host"], 22, 0.5)
+                    if self.wifi_up:
+                        link = ssh = True
+                        self.via = "wifi"
             if (link, ssh) != (self.link, self.ssh_port):
                 self.link, self.ssh_port = link, ssh
                 if not link:
@@ -1246,9 +1268,16 @@ class Engine:
         import paramiko
         errors = []
         keys = [k for k in (self.cfg["key"], APP_KEY if os.path.exists(APP_KEY) else None) if k] + [None]
+        wifi = self.via == "wifi"
+        if wifi and not self.cfg.get("host_key"):
+            raise PermissionError("Wi-Fi needs one cable connection first, to learn the tablet's SSH key")
+        host = self.cfg["wifi_host"] if wifi else self.cfg["host"]
         for key in keys:
             try:
-                tab = rt.Tablet(self.cfg["host"], self.cfg["user"], None, keyfile=key)
+                # Over the cable the tablet is whatever is plugged in (a reset makes new host keys);
+                # over Wi-Fi only the tablet whose key was pinned on the cable is trusted.
+                tab = rt.Tablet(host, self.cfg["user"], None, keyfile=key,
+                                host_key=self.cfg["host_key"] if wifi else None)
                 return tab, tab.install_helper()
             except paramiko.AuthenticationException as ex:
                 errors.append(ex)
@@ -1261,6 +1290,9 @@ class Engine:
 
     def explain(self, ex):
         msg = str(ex) or ex.__class__.__name__
+        if ex.__class__.__name__ == "BadHostKeyException" or "not found in known_hosts" in msg:
+            return ("Something at the tablet's Wi-Fi address answered with a different SSH key, so the app didn't "
+                    "log in. If the tablet was reset, plug it in once to pair it again.")
         if isinstance(ex, PermissionError):
             return "The tablet didn't accept this computer's key. Open Setup and repeat the password step."
         if isinstance(ex, (socket.timeout, TimeoutError, ConnectionRefusedError)) or "timed out" in msg:
@@ -1299,7 +1331,9 @@ class Engine:
             self.cfg["model"] = model.key
             self.save()
         self.refresh_mapper()
-        self.set_status("connected", "Connected")
+        self.set_status("connected", "Connected over Wi-Fi" if self.via == "wifi" else "Connected")
+        if self.via == "usb" and self.worker and self.worker.tab:
+            threading.Thread(target=self.cable_chores, args=(self.worker.tab,), daemon=True).start()
         if self.cfg["auto_output"]:
             self.output_on = True
         if self.cfg["auto_screen"] and self.worker:
@@ -1309,6 +1343,80 @@ class Engine:
                 self.set_status("connected", f"Connected, but the tablet screen didn't start: {ex}")
         self.changed()
 
+    # ------------------------------------------------------------------ Wi-Fi
+
+    WLAN_IP = "ip -4 -o addr show wlan0 2>/dev/null"
+    SSH_WLAN = "command -v rm-ssh-over-wlan >/dev/null && rm-ssh-over-wlan {}"
+
+    @staticmethod
+    def wlan_ip(out):
+        """The address in `ip -4 -o addr show wlan0` output, or ""."""
+        for word in out.decode(errors="replace").split():
+            if word.count(".") == 3 and "/" in word:
+                return word.split("/")[0]
+        return ""
+
+    def cable_chores(self, tab):
+        """On every cable connection: pin the tablet's SSH key, and keep its Wi-Fi address current
+        (or switch SSH over Wi-Fi off there, if that was asked while it was away)."""
+        try:
+            key = tab.server_key()
+            changed = {}
+            if self.cfg.get("host_key") != key:
+                changed["host_key"] = key
+            if self.cfg.get("wifi_off_pending"):
+                tab.run(self.SSH_WLAN.format("off"))
+                changed["wifi_off_pending"] = False
+            elif self.cfg.get("wifi"):
+                ip = self.wlan_ip(tab.run(self.WLAN_IP)[1])
+                if ip and ip != self.cfg.get("wifi_host"):
+                    changed["wifi_host"] = ip
+            if changed:
+                with self.lock:
+                    self.cfg.update(changed)
+                    self.save()
+                self.changed()
+        except Exception as ex:
+            print("cable chores:", ex, flush=True)
+
+    def set_wifi(self, on):
+        """Switch connecting over Wi-Fi on (over the cable: turns on the tablet's SSH over Wi-Fi with
+        reMarkable's rm-ssh-over-wlan, learns its address and pins its key) or off."""
+        tab = self.worker.tab if self.connected and self.worker else None
+        if on:
+            if not tab or self.via != "usb":
+                return {"ok": False, "text": "Plug the tablet in with the cable first: Wi-Fi is switched on over it."}
+            try:
+                code, _, err = tab.run(self.SSH_WLAN.format("on") + " || true")
+                ip = self.wlan_ip(tab.run(self.WLAN_IP)[1])
+                key = tab.server_key()
+            except Exception as ex:
+                return {"ok": False, "text": self.explain(ex)}
+            if not ip:
+                return {"ok": False, "text": "The tablet isn't on Wi-Fi. Connect it to your network on the tablet, then try again."}
+            with self.lock:
+                self.cfg.update(wifi=True, wifi_host=ip, host_key=key, wifi_off_pending=False)
+                self.save()
+            self.changed()
+            ok = any(port_open(ip, 22, 1.0) or time.sleep(1) for _ in range(5))
+            return {"ok": True, "text": f"Wi-Fi is on. Unplug the cable and the app finds the tablet at {ip}." if ok else
+                    f"Wi-Fi is on, but {ip} isn't answering from this computer yet. Is it on the same network?"}
+        off_now = False
+        if tab:
+            try:
+                tab.run(self.SSH_WLAN.format("off") + " || true")
+                off_now = True
+            except Exception:
+                pass
+        with self.lock:
+            self.cfg.update(wifi=False, wifi_off_pending=not off_now)
+            self.save()
+        self.changed()
+        if self.via == "wifi":
+            threading.Thread(target=self.disconnect, daemon=True).start()
+        return {"ok": True, "text": "Wi-Fi is off." if off_now else
+                "Wi-Fi is off here. The tablet still takes Wi-Fi logins until it's next plugged in, when the app switches that off."}
+
     def on_disconnected(self, worker):
         self.companion.chan = None
         self.mouse.end()
@@ -1317,10 +1425,12 @@ class Engine:
             self.output_on = False
             self.cal = None
             host = self.cfg["host"]
-            if host.startswith("10.11.99.") and not usb_link(host):
-                self.link = self.ssh_port = False
+            if self.via == "wifi" or (host.startswith("10.11.99.") and not usb_link(host)):
+                self.link = self.ssh_port = self.wifi_up = False
+                self.wifi_knock = time.time() + 3
             if self.status[0] != "error":
                 self.set_status("idle", "Tablet disconnected" if self.link else
+                                "Wi-Fi connection lost. The notebook app is back on the tablet." if self.via == "wifi" else
                                 "Tablet unplugged. The notebook app is back on the tablet.")
         self.changed()
 

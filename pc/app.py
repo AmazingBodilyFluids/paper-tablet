@@ -168,6 +168,9 @@ class Api:
     def reset_peak(self):
         self._engine.reset_peak()
 
+    def set_wifi(self, on):
+        return self._engine.set_wifi(bool(on))
+
     def install_key(self, password):
         return self._engine.install_key(password)
 
