@@ -105,7 +105,7 @@ function render() {
   $("#swScreen2").disabled = !S.connected;
   $("#scrState").textContent = S.screen ? "On. The notebook app is paused." : (S.connected ? "Off" : "Connect the tablet first");
 
-  if (Date.now() > themeHold) applyTheme(S.cfg.theme || "default");
+  if (Date.now() > themeHold) applyTheme(S.cfg.theme || "intaglio");
 
   // bound settings
   for (const el of $$("[data-key]")) {
@@ -121,6 +121,13 @@ function render() {
   }
   $("#gammaV").textContent = (+S.cfg.gamma).toFixed(2);
   $("#threshV").textContent = Math.round(S.cfg.threshold * 100) + "%";
+  $("#paperV").textContent = (+S.cfg.paper_mm).toFixed(1).replace(/\.0$/, "") + " mm";
+  $("#traceV").textContent = Math.round(S.cfg.trace_opacity * 100) + "%";
+  const tf = S.cfg.trace_file || "";
+  $("#traceName").textContent = tf ? tf.split(/[\\/]/).pop() : "None. Show a photo or sketch under your strokes to trace over.";
+  $("#traceDel").disabled = !tf;
+  const mk = S.cfg.mask || "", cells = [...mk].reduce((n, c) => n + [0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4][parseInt(c, 16)], 0);
+  $("#maskInfo").textContent = cells ? `${Math.round(100 * cells / (mk.length * 4))}% of the screen is masked.` : "Nothing masked yet.";
   $("#trailV").textContent = S.cfg.trail_ms ? (S.cfg.trail_ms / 1000).toFixed(S.cfg.trail_ms % 1000 ? 2 : 0) + " s" : "keep";
   $("#fitHint").textContent = {
     crop: "The whole display is reachable; a slice of the tablet goes unused if the shapes differ.",
@@ -208,6 +215,8 @@ document.addEventListener("input", e => {
     paintRange(el);
     const v = el.dataset.type === "int" ? parseInt(el.value, 10) : parseFloat(el.value);
     S.cfg[el.dataset.key] = v;
+    if (el.dataset.key === "paper_mm") $("#paperV").textContent = v.toFixed(1).replace(/\.0$/, "") + " mm";
+    if (el.dataset.key === "trace_opacity") $("#traceV").textContent = Math.round(v * 100) + "%";
     if (el.dataset.key === "gamma") $("#gammaV").textContent = v.toFixed(2);
     if (el.dataset.key === "threshold") $("#threshV").textContent = Math.round(v * 100) + "%";
     drawCurve();
@@ -371,9 +380,10 @@ function drawLive() {
     const ctx = cv.getContext("2d");
     ctx.putImageData(statics[id], 0, 0);
     const p = LIVE.pen;
-    if (!p) continue;
     const d = window.devicePixelRatio || 1, w = cv.width / d, h = cv.height / d;
     const f = frameRect(w, h);
+    drawFingers(ctx, f);
+    if (!p) continue;
     const x = f.x + p.p * f.w, y = f.y + p.q * f.h;
     if (S.cfg.tilt && p.tilt) {
       ctx.strokeStyle = "rgba(20,30,40,0.55)"; ctx.lineWidth = 2; ctx.lineCap = "round";
@@ -385,8 +395,8 @@ function drawLive() {
     if (p.touching) { ctx.fillStyle = col; ctx.fill(); }
     ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
   }
-  const p = LIVE.pen;
-  $("#homeReadout").innerHTML = p
+  const p = LIVE.pen, g = gestureText();
+  $("#homeReadout").innerHTML = g ? `<span><b>fingers</b> ${esc(g)}</span>` : p
     ? `<span><b>${p.eraser ? "eraser" : "pen"}</b> ${p.touching ? "down" : "hover"}</span><span><b>pressure</b> ${Math.round(p.out / 10.24)}%</span>` +
       `<span><b>tilt</b> ${p.tilt[0]}°, ${p.tilt[1]}°</span><span><b>display</b> ${p.screen[0]}, ${p.screen[1]}</span>`
     : (S && S.connected ? "<span>Hover the pen over the tablet</span>" : "");
@@ -396,6 +406,32 @@ function drawLive() {
     $("#peakText").textContent = peak ? `Highest: ${Math.round(100 * peak / max)}% of the pen's range` : "Not pressed yet";
     if (p && p.touching) drawCurve(p.raw);
   }
+}
+
+// Fingers on the tablet: a ring per contact, grey when the pen or a palm has muted them.
+function drawFingers(ctx, f) {
+  const t = LIVE.touch;
+  if (!t || !t.pts.length) return;
+  ctx.lineWidth = 3;
+  for (const [p, q] of t.pts) {
+    const x = f.x + p * f.w, y = f.y + q * f.h;
+    ctx.beginPath(); ctx.arc(x, y, 13, 0, Math.PI * 2);
+    ctx.strokeStyle = t.live ? C.area : C.grid;
+    ctx.fillStyle = t.live ? "rgba(120,170,255,0.25)" : "rgba(128,128,128,0.2)";
+    ctx.fill(); ctx.stroke();
+  }
+}
+const GESTURES = { undo: "swipe: undo", redo: "swipe: redo", zoomin: "pinch: zoom in", zoomout: "pinch: zoom out",
+  "pan begin": "pan", "pan end": "pan", "rotate begin": "twist: rotate", "rotate end": "twist: rotate",
+  "profile next": "next profile", "profile prev": "previous profile" };
+function gestureText() {
+  const t = LIVE.touch, a = LIVE.gesture || "";
+  const n = t ? t.pts.length : 0;
+  let g = GESTURES[a] || (a.startsWith("tap ") ? `${a.split(" ")[1]}-finger tap ×${a.split(" ")[2]}` : a.startsWith("press ") ? "panel button" : "");
+  if (t && n && !t.live) g = `${n} finger${n > 1 ? "s" : ""} muted (pen near or palm)`;
+  else if (n && !g) g = `${n} finger${n > 1 ? "s" : ""} down` + (S.touch_mode === "windows" ? ", sent to Windows as touch" : "");
+  if (t && t.palms) g += (g ? " · " : "") + `${t.palms} palm contact${t.palms > 1 ? "s" : ""} ignored`;
+  return g;
 }
 
 // drag to set the active area on the Screen area page
@@ -739,7 +775,7 @@ const Panel = {
     ["Fit", "shortcut", "ctrl+0"], ["Move", "shortcut", "v"], ["Lasso", "shortcut", "l"], ["Fill", "shortcut", "g"],
     ["Swap col", "shortcut", "x"], ["Deselect", "shortcut", "ctrl+d"], ["Transform", "shortcut", "ctrl+t"],
     ["New layer", "shortcut", "ctrl+shift+n"], ["Copy", "shortcut", "ctrl+c"], ["Paste", "shortcut", "ctrl+v"],
-    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""],
+    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""], ["Move image", "trace", ""], ["Light", "light", ""], ["Mask", "mask", ""],
   ],
 
   label(spec) {
@@ -758,6 +794,9 @@ const Panel = {
     if (b.kind === "pen") return S.output ? "on" : "off";
     if (b.kind === "snap") return S.cfg.snap ? "on" : "off";
     if (b.kind === "clear") return "tablet ink";
+    if (b.kind === "trace") return S.cfg.trace_adjust ? "moving" : "image";
+    if (b.kind === "light") return S.cfg.light ? "on" : "off";
+    if (b.kind === "mask") return S.cfg.mask_edit ? "editing" : S.cfg.mask_on ? "on" : "off";
     return "";
   },
 
@@ -766,7 +805,8 @@ const Panel = {
     const saved = JSON.stringify(S.cfg.panel_buttons);
     if (!this.btns || (!this.dirty && saved !== JSON.stringify(this.btns))) this.btns = JSON.parse(saved);
     if (view !== "panel") return;
-    const sig = JSON.stringify([this.btns, this.sel, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap]);
+    this.renderProfiles();
+    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.cfg.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_edit]);
     if (sig !== this.sig) { this.sig = sig; this.draw(); }
     if (!this.recording && document.activeElement !== $("#peName") && document.activeElement !== $("#peKeys")) this.fill();
     this.renderTaps();
@@ -813,6 +853,82 @@ const Panel = {
     setKey("taps", S.taps).then(refresh);
   },
 
+  // ---- profiles: named button sets, cycled with the arrows on the tablet
+  profRow(px, W, T) {
+    const profs = S.cfg.panel_profiles || [], many = profs.length > 1;
+    const name = (profs[S.cfg.panel_profile] || {}).name || "";
+    const tri = (left, flip) => `<svg viewBox="0 0 22 30" style="${left ? "left" : "right"}:${px(16)};width:${px(22)};height:${px(30)}">
+      <path d="${flip ? "M22 0L0 15L22 30Z" : "M0 0L22 15L0 30Z"}" fill="#000"/></svg>`;
+    return `<div class="pm-prof" title="Tap the arrows on the tablet to switch profile"
+      style="left:${px(16)};top:${px(T + 10)};width:${px(W - 32)};height:${px(72)};border-radius:${px(14)};border-width:${px(3)};
+      font-size:${px(26)};padding:0 ${px(many ? 56 : 12)}">${many ? tri(true, true) : ""}<span>${esc(name)}</span>${many ? tri(false, false) : ""}</div>`;
+  },
+  renderProfiles() {
+    const profs = S.cfg.panel_profiles || [], cur = S.cfg.panel_profile || 0;
+    const sel = $("#profSel"), sig = JSON.stringify([profs.map(p => p.name), cur]);
+    if (sel.dataset.sig !== sig && document.activeElement !== sel) {
+      sel.dataset.sig = sig;
+      sel.innerHTML = profs.map((p, i) => `<option value="${i}"${i === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+    }
+    if (document.activeElement !== $("#profName")) $("#profName").value = (profs[cur] || {}).name || "";
+    $("#profDel").disabled = profs.length < 2;
+    const tm = (profs[cur] || {}).touch || "shortcuts";
+    for (const b of $$("#profTouch button")) b.classList.toggle("on", b.dataset.v === tm);
+  },
+  async flush() {  // a pending button edit belongs to the profile it was made in
+    if (!this.t) return;
+    clearTimeout(this.t); this.t = null;
+    if (this.dirty) { await setKey("panel_buttons", this.btns); this.dirty = false; }
+  },
+  async setProfiles(profs, cur) {
+    await this.flush();
+    await setKey("panel_profiles", profs);
+    if (cur !== undefined) await setKey("panel_profile", cur);
+    this.btns = null; this.sel = 0;
+    await refresh();
+  },
+  async switchProfile(i) {
+    await this.flush();
+    await setKey("panel_profile", i);
+    this.btns = null; this.sel = 0;
+    await refresh();
+  },
+  initProfiles() {
+    const copy = o => JSON.parse(JSON.stringify(o));
+    const profs = () => copy(S.cfg.panel_profiles || []);
+    $("#profSel").onchange = e => this.switchProfile(+e.target.value);
+    for (const b of $$("#profTouch button")) b.onclick = () => {
+      const p = profs();
+      p[S.cfg.panel_profile].touch = b.dataset.v;
+      this.setProfiles(p);
+    };
+    $("#profName").onchange = e => {
+      const p = profs(), name = e.target.value.trim();
+      if (!name) { e.target.value = p[S.cfg.panel_profile].name; return; }
+      p[S.cfg.panel_profile].name = name;
+      this.setProfiles(p);
+    };
+    const add = (name, buttons) => {
+      const p = profs();
+      p.push({ name, buttons: copy(buttons) });
+      this.setProfiles(p, p.length - 1).then(() => { $("#profName").focus(); $("#profName").select(); });
+    };
+    $("#profNew").onclick = async () => { await this.flush(); add(`Profile ${S.cfg.panel_profiles.length + 1}`, S.default_buttons); };
+    $("#profDup").onclick = async () => {
+      await this.flush();
+      add(S.cfg.panel_profiles[S.cfg.panel_profile].name + " copy", this.btns || S.cfg.panel_buttons);
+    };
+    let armed = 0;
+    $("#profDel").onclick = () => {  // two clicks, so a stray one can't lose a layout
+      const b = $("#profDel");
+      if (Date.now() - armed > 3000) { armed = Date.now(); b.textContent = "Sure?"; setTimeout(() => b.textContent = "Delete", 3000); return; }
+      armed = 0; b.textContent = "Delete";
+      const p = profs(), cur = S.cfg.panel_profile;
+      const gone = p.splice(cur, 1)[0];
+      this.setProfiles(p, Math.max(0, cur - 1)).then(() => toast(`Deleted "${gone.name}".`));
+    };
+  },
+
   draw() {
     const wrap = $("#pmWrap"), [vw, vh] = S.view, right = S.cfg.panel === "right";
     const W = S.panel_px, T = S.tab_px, k = Math.min(640 / vh, 380 / (W + 260));
@@ -835,7 +951,8 @@ const Panel = {
     const panel = `<div class="pm-panel" style="width:${px(W)};height:${px(vh)};${right ? "right:0" : "left:0"}">
         <div class="pm-edge" style="${right ? "left:0" : "right:0"};width:${px(3)}"></div>
         <div class="pm-head" style="left:${px(right ? 22 : T + 14)};top:${px(24)};font-size:${px(22)};letter-spacing:${px(4)}">PAPER<br>TABLET</div>
-        <div class="pm-status" style="left:${px(22)};top:${px(T + 22)};width:${px(W - 44)};font-size:${px(21)}">Pen on · Photoshop</div>
+        ${this.profRow(px, W, T)}
+        <div class="pm-status" style="left:${px(22)};top:${px(T + 10 + 72 + 8)};width:${px(W - 44)};font-size:${px(21)}">Connected to PC. Pen on</div>
         ${cells}
         <div class="pm-foot" style="left:${px(22)};top:${px(vh - this.FOOT + 18)};width:${px(W - 44)};font-size:${px(19)}">${S.cfg.gestures ?
           "3 fingers swipe: left undo, right redo<br>2 fingers: pan, pinch to zoom<br>5 fingers: twist to rotate" : "Power button: back to notebooks"}</div>
@@ -977,12 +1094,16 @@ const Panel = {
       if (k === "pen" && !b.t) patch.t = "Pen";
       if (k === "snap" && !b.t) patch.t = "Shapes";
       if (k === "clear" && !b.t) patch.t = "Clear";
+      if (k === "trace" && !b.t) patch.t = "Image";
+      if (k === "light" && !b.t) patch.t = "Light";
+      if (k === "mask" && !b.t) patch.t = "Mask";
       if (k === "none") patch.t = "";
       this.edit(patch);
     };
     $("#peRecord").onclick = () => this.record(!this.recording);
     window.addEventListener("keydown", e => this.onKey(e), true);
     window.addEventListener("keyup", e => this.onKey(e), true);
+    this.initProfiles();
     $("#pmReset").onclick = () => {
       this.btns = JSON.parse(JSON.stringify(S.default_buttons));
       this.save();
@@ -991,3 +1112,20 @@ const Panel = {
   },
 };
 Panel.init();
+
+// ------------------------------------------------------------------ tracing image
+async function pickTrace() {
+  const path = await api().pick_trace_image();
+  if (path) { await resetTrace(); toast("Tracing image sent to the tablet."); }
+  refresh();
+}
+async function resetTrace() {
+  for (const [k, v] of [["trace_x", 0], ["trace_y", 0], ["trace_scale", 1]]) await setKey(k, v);
+  refresh();
+}
+
+async function maskOp(op) {
+  const n = 72 * 72 / 4, mk = (S.cfg.mask || "").padEnd(n, "0");
+  await setKey("mask", op === "clear" ? "0".repeat(n) : [...mk].map(c => (15 - parseInt(c, 16)).toString(16)).join(""));
+  refresh();
+}

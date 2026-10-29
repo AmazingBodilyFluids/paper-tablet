@@ -43,6 +43,31 @@ Window {
     readonly property real panelW: panelOn && panelOpen ? panelFrac * view.width : 0
     readonly property real panelX: panelSide === "right" ? view.width - panelW : 0
     readonly property real headH: 230
+    readonly property real profY: tabS + 10   // the profile row: arrows either side of its name
+    readonly property real profH: 72
+    property string profileName: ""
+    // paper under the ink: plain | lined | squared | dots | cross | blueprint | isometric
+    property string paper: "plain"
+    property real paperStep: 45          // px between lines (the PC converts from mm)
+    // tracing image under the ink: file on the tablet, its scale and offset in view pixels
+    property string traceSrc: ""
+    property real traceScale: 1
+    property real traceX: 0
+    property real traceY: 0
+    property real traceOpacity: 0.5
+    property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
+    property bool lightOn: false
+    property bool nativeTouch: false     // fingers go to Windows as real touch, no gestures here
+    // trace mask: a 72 x 72 grid over the view; set cells are where the pen does nothing in Windows.
+    // In edit mode the pen paints cells (eraser end clears) and one finger drags the whole mask.
+    readonly property int maskN: 72
+    property var maskBits: []            // maskN * maskN of 0 / 1, row by row
+    property bool maskOn: false
+    property bool maskEdit: false
+    property var maskRuns: []            // [row, first col, last col] runs, what the overlay draws
+    property real maskDX: 0              // live finger drag while editing, in view pixels
+    property real maskDY: 0
+    property int profileCount: 1
     readonly property real footH: 190
     readonly property int rows: 8
     readonly property real cellW: panelW / 2
@@ -83,12 +108,31 @@ Window {
         else if (c === "snap") snap(a)
         else if (c === "panel") { panelSide = a[0]; if (a.length > 1) panelFrac = parseFloat(a[1]) }
         else if (c === "panelopen") panelOpen = a[0] === "1"
-        else if (c === "gestures") { gesturesOn = a[0] === "1"; if (a.length > 1) swipeStep = parseFloat(a[1]) }
+        else if (c === "paper") { paper = a[0]; if (a.length > 1) paperStep = Math.max(12, parseFloat(a[1])) }
+        else if (c === "trace") {  // trace <opacity> <scale> <x> <y> <file or empty>
+            traceOpacity = parseFloat(a[0]); traceScale = parseFloat(a[1])
+            traceX = parseFloat(a[2]); traceY = parseFloat(a[3])
+            var src = a.slice(4).join(" ")
+            traceSrc = src ? "file://" + src : ""
+        }
+        else if (c === "traceadjust") traceAdjust = a[0] === "1"
+        else if (c === "mask") {  // mask <on> <edit> <hex>
+            maskOn = a[0] === "1"; maskEdit = a[1] === "1"
+            if (a.length > 2) { maskBits = maskFromHex(a[2]); maskRedraw() }
+        }
+        else if (c === "profile") { profileCount = parseInt(a[1]); profileName = a.slice(2).join(" ") }
+        else if (c === "gestures") {
+            gesturesOn = a[0] === "1"
+            if (a.length > 1) swipeStep = parseFloat(a[1])
+            if (a.length > 2) palmSize = parseFloat(a[2])
+            if (a.length > 3) nativeTouch = a[3] === "1"
+        }
         else if (c === "toast") say(a.join(" "))
         else if (c === "state") {
             for (var i = 0; i + 1 < a.length; i += 2) {
                 if (a[i] === "pen") penOut = a[i + 1] === "1"
                 else if (a[i] === "snap") snapOn = a[i + 1] === "1"
+                else if (a[i] === "light") lightOn = a[i + 1] === "1"
             }
         } else if (c === "unlatch") latched = ({})
     }
@@ -123,6 +167,72 @@ Window {
         else if (fadeMs > 0) st.fade(fadeMs)
     }
 
+    // ---- trace mask
+    function maskFromHex(h) {
+        var n = maskN * maskN, out = new Array(n)
+        for (var i = 0; i < n; i++) {
+            var d = parseInt(h.charAt(i >> 2), 16) || 0
+            out[i] = (d >> (3 - (i & 3))) & 1
+        }
+        return out
+    }
+    function maskHex() {
+        var s = "", n = maskN * maskN
+        for (var i = 0; i < n; i += 4)
+            s += ((maskBits[i] << 3) | (maskBits[i + 1] << 2) | (maskBits[i + 2] << 1) | maskBits[i + 3]).toString(16)
+        return s
+    }
+    function maskRedraw() {
+        var runs = []
+        for (var r = 0; r < maskN; r++) {
+            var c0 = -1
+            for (var c = 0; c <= maskN; c++) {
+                var on = c < maskN && maskBits[r * maskN + c]
+                if (on && c0 < 0) c0 = c
+                if (!on && c0 >= 0) { runs.push([r, c0, c - 1]); c0 = -1 }
+            }
+        }
+        maskRuns = runs
+    }
+    function maskPaint(p, value) {  // a round brush, 2 cells across each way
+        var cx = Math.floor(p.x / view.width * maskN), cy = Math.floor(p.y / view.height * maskN), hit = false
+        for (var dy = -2; dy <= 2; dy++)
+            for (var dx = -2; dx <= 2; dx++) {
+                if (dx * dx + dy * dy > 5) continue
+                var x = cx + dx, y = cy + dy
+                if (x < 0 || y < 0 || x >= maskN || y >= maskN) continue
+                if (maskBits[y * maskN + x] !== value) { maskBits[y * maskN + x] = value; hit = true }
+            }
+        if (hit) maskTimer.start()
+    }
+    Timer { id: maskTimer; interval: 120; onTriggered: win.maskRedraw() }
+    function maskShift(dx, dy) {  // move the whole mask by whole cells
+        var out = new Array(maskN * maskN)
+        for (var r = 0; r < maskN; r++)
+            for (var c = 0; c < maskN; c++) {
+                var sr = r - dy, sc = c - dx
+                out[r * maskN + c] = sr >= 0 && sc >= 0 && sr < maskN && sc < maskN ? maskBits[sr * maskN + sc] : 0
+            }
+        maskBits = out
+        maskRedraw()
+    }
+    property var maskDrag: null
+    property bool maskDirty: false
+    function maskFingers() {
+        var l = gList()
+        if (l.length === 1 && !maskDrag) maskDrag = {x: l[0].x, y: l[0].y}
+        if (l.length === 0 && maskDrag) {
+            var dx = Math.round(maskDX / view.width * maskN), dy = Math.round(maskDY / view.height * maskN)
+            maskDX = 0; maskDY = 0; maskDrag = null
+            if (dx || dy) { maskShift(dx, dy); act("mask " + maskHex()) }
+        }
+    }
+    function maskFingerMoved() {
+        var l = gList()
+        if (!maskDrag || l.length !== 1) return
+        maskDX = l[0].x - maskDrag.x; maskDY = l[0].y - maskDrag.y
+    }
+
     // ---- panel: the fold tab and the buttons, by finger or pen
     function tabHit(p) {
         return panelOn && p.y < tabS && (panelSide === "right" ? p.x >= view.width - tabS : p.x < tabS)
@@ -131,6 +241,12 @@ Window {
         if (!panelOn) return false
         if (!panelOpen) return tabHit(p)
         return p.x >= panelX && p.x < panelX + panelW
+    }
+    // -1 / +1 on the profile arrows (only with more than one profile), 0 elsewhere
+    function profileArrow(p) {
+        if (!panelOpen || profileCount < 2 || !inPanel(p) || p.y < profY || p.y >= profY + profH) return 0
+        var x = p.x - panelX
+        return x < panelW * 0.3 ? -1 : x >= panelW * 0.7 ? 1 : 0
     }
     function buttonAt(p) {
         if (!panelOpen || !inPanel(p) || p.y < headH || p.y >= view.height - footH) return -1
@@ -150,6 +266,8 @@ Window {
     // Returns what was pressed: -2 for the fold tab, a button index, or -1.
     function pressAt(p) {
         if (tabHit(p)) { fold(); return -2 }
+        var arrow = profileArrow(p)
+        if (arrow) { latched = ({}); act("profile " + (arrow > 0 ? "next" : "prev")); return -3 }
         var i = buttonAt(p)
         pressBtn(i)
         return i
@@ -163,6 +281,9 @@ Window {
         else if (b.kind === "pen") { penOut = !penOut; act("pen " + (penOut ? 1 : 0)); say(penOut ? "Pen on" : "Pen off") }
         else if (b.kind === "snap") { snapOn = !snapOn; act("snap " + (snapOn ? 1 : 0)); say(snapOn ? "Shapes on" : "Shapes off") }
         else if (b.kind === "local") { clearInk() }
+        else if (b.kind === "trace") { act("traceadjust") }
+        else if (b.kind === "light") { act("light") }
+        else if (b.kind === "mask") { act("maskedit") }
         else if (b.kind === "hold") {
             if (latched[i]) { act("release " + i); setLatch(i, false); keepLatch = false; say(b.t + " released") }
             else { act("press " + i); setLatch(i, true); keepLatch = true; holdStart = Date.now() }
@@ -186,7 +307,7 @@ Window {
     function pen(px, py, pressure, touching, eraser, inRange) {
         if (inRange) {
             penSeen = Date.now()
-            if (gMode !== "") endGesture()  // the pen came back: a hand on the screen is a palm
+            if (gMode !== "" && gMode !== "dead") { endGesture(); sendTouch() }  // the pen came back: a hand on the screen is a palm
         }
         var p = view.mapFromItem(win.contentItem, px, py)
         if (penBtn !== -1 || (touching && inPanel(p))) {
@@ -194,6 +315,12 @@ Window {
             endStroke()
             if (touching && penBtn === -1) { penBtn = pressAt(p); if (penBtn === -1) penBtn = 99 }
             else if (!touching || !inPanel(p)) { if (penBtn >= 0 && penBtn !== 99) releaseBtn(penBtn, true); else pressing = -1; penBtn = -1 }
+            return
+        }
+        if (maskEdit && mode === "ink") {  // painting the mask: the pen stays on the tablet
+            endStroke()
+            if (touching) { maskPaint(p, eraser ? 0 : 1); maskDirty = true }
+            else if (maskDirty) { maskDirty = false; maskRedraw(); act("mask " + maskHex()) }
             return
         }
         penDown = touching
@@ -233,6 +360,9 @@ Window {
     property var gC0: null         // centroid when the current finger count began
     property var gSent: null       // last pan offset sent
     property var touchBtn: ({})    // pointId -> panel item, for fingers that landed on the panel
+    property real palmSize: 0      // contact size (panel units) above which a touch is a palm; 0 = off
+    property var palms: ({})       // pointId -> true: contacts judged to be a palm, ignored until lifted
+    property real gLastEv: 0       // last touch event of any kind, for the stuck-contact sweep
     property real swipeStep: 100   // three-finger swipe: px of drag per undo / redo step
     property int gSteps: 0         // net steps sent this swipe: < 0 undos, > 0 redos
     // taps: a touch (all fingers down and up again) that is short and barely moves
@@ -275,25 +405,79 @@ Window {
     // A finished touch: count it towards a tap series and report the series once no further
     // tap follows (the PC decides what "tap 1 3" etc. do; unassigned ones do nothing).
     function touchEnded() {
-        var tap = gTapOk && gMax <= 3 && gMoved < 30 && Date.now() - gT0 < 350
+        // five fingers never land or lift quite together, so they get a little longer
+        var tap = gTapOk && (gMax <= 3 || gMax === 5) && gMoved < 30 && Date.now() - gT0 < (gMax === 5 ? 500 : 350)
         if (!tap) { tapTimer.stop(); tapK = 0; return }
         if (tapTimer.running && tapN === gMax) tapK++
         else { tapN = gMax; tapK = 1 }
         tapTimer.restart()
     }
+    // Contact size as Qt reports it (the panel's ABS_MT_TOUCH_MAJOR); 0 if the platform gives none.
+    function touchSize(t) {
+        var d = t.ellipseDiameters
+        return d ? Math.max(d.width, d.height) : 0
+    }
+    // A palm: drop the contact and end whatever gesture it was part of. Sticky until it lifts,
+    // because a palm often lands small at its edge and grows.
+    function palmCheck(t) {
+        if (palmSize <= 0 || touchSize(t) <= palmSize || palms[t.pointId]) return false
+        var pl = palms; pl[t.pointId] = true; palms = pl
+        console.warn("LOG:palm " + Math.round(touchSize(t)))
+        if (t.pointId in gPts) { var g = gPts; delete g[t.pointId]; gPts = g }
+        endGesture()
+        return true
+    }
+    // A contact whose release got lost would block gestures for good: after 3 s with no touch
+    // events at all, forget every contact.
+    Timer {
+        interval: 1000; repeat: true; running: Object.keys(win.gPts).length > 0
+        onTriggered: if (Date.now() - win.gLastEv > 3000) {
+            console.warn("LOG:touch sweep " + Object.keys(win.gPts).length)
+            win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged(); win.sendTouch()
+        }
+    }
     Timer { id: tapTimer; interval: 330; onTriggered: { if (win.tapK > 0) win.act("tap " + win.tapN + " " + win.tapK); win.tapK = 0 } }
+    // Adjusting the tracing image: one finger drags it, two zoom it (about its centre).
+    property var adj: null         // {c, d, x, y, s} where the current finger count began
+    function adjustChanged() {
+        var l = gList(), n = l.length
+        if (n === 0) {
+            if (adj) act("trace " + traceX.toFixed(1) + " " + traceY.toFixed(1) + " " + traceScale.toFixed(4))
+            adj = null; gMode = ""; gMax = 0; return
+        }
+        adj = {c: centroid(l), d: n > 1 ? spread(l) : 0, x: traceX, y: traceY, s: traceScale}
+    }
+    function adjustMoved() {
+        var l = gList()
+        if (!adj || !l.length) return
+        var c = centroid(l)
+        traceX = adj.x + c.x - adj.c.x
+        traceY = adj.y + c.y - adj.c.y
+        if (l.length > 1 && adj.d > 20) traceScale = Math.max(0.05, Math.min(20, adj.s * spread(l) / adj.d))
+    }
+    // Every contact to the PC as fractions of the view: "touch live|dead <palms> id x y ...". The PC
+    // shows them on its live view and, in Windows-touch mode, injects them ("dead" = lift them all).
+    function sendTouch() {
+        var out = ["touch", gMode === "dead" || traceAdjust || maskEdit ? "dead" : "live", Object.keys(palms).length]
+        for (var id in gPts)
+            out.push(id, (gPts[id].x / view.width).toFixed(4), (gPts[id].y / view.height).toFixed(4))
+        act(out.join(" "))
+    }
     function fingersChanged() {
+        if (maskEdit) { maskFingers(); return }
+        if (traceAdjust) { adjustChanged(); return }
         var l = gList(), n = l.length
         gMax = Math.max(gMax, n)
         if (n === 0) {
             if (gMode === "pan") act("pan end")
             if (gMode === "rotate") act("rotate end")
-            if (gMax > 0) touchEnded()
+            if (gMax > 0 && !nativeTouch) touchEnded()
             gMode = ""; gMax = 0; gC0 = null; gMoved = 0; gTapOk = true; gStart = ({}); gT0 = 0; return
         }
         if (gT0 === 0) gT0 = Date.now()
         if (gMode === "dead") return
         if (gMax > 5 || Date.now() - penSeen < 700 || !gesturesOn || mode !== "ink") { endGesture(); return }
+        if (nativeTouch) { gMode = "native"; return }
         if (gMode === "rotate" && n !== 5) { endGesture(); return }
         if (n === 5) {
             if (gMode === "three" && gSteps !== 0) { endGesture(); return }
@@ -311,11 +495,14 @@ Window {
         }
     }
     function fingersMoved() {
+        if (maskEdit) { maskFingerMoved(); return }
+        if (traceAdjust) { adjustMoved(); return }
         var l = gList()
         for (var id in gPts) {
             var a = gPts[id], b = gStart[id]
             if (b) gMoved = Math.max(gMoved, Math.abs(a.x - b.x) + Math.abs(a.y - b.y))
         }
+        if (nativeTouch) return
         if (gMode === "dead" || !gC0) return
         if (l.length === 2 && (gMode === "" || gMode === "pan" || gMode === "pinch")) {
             var c = centroid(l), d = spread(l)
@@ -387,6 +574,111 @@ Window {
         anchors.centerIn: parent
         rotation: rot * 90
 
+        // ------------------------------------------------ paper and tracing image, under the ink
+        // Drawn once as plain black items: crisp 1-3 px lines stay sharp on e-ink, where
+        // grey or anti-aliased strokes dither. Only the drawing area, never under the panel.
+        Item {
+            id: paperArea
+            visible: win.mode === "ink"
+            x: win.panelSide === "left" ? win.panelW : 0
+            width: view.width - win.panelW; height: view.height
+            clip: true
+            Image {
+                visible: win.traceSrc !== ""
+                source: win.traceSrc
+                asynchronous: true; cache: false; smooth: true
+                sourceSize.width: 2400; sourceSize.height: 2400   // keep memory sane for huge photos
+                fillMode: Image.PreserveAspectFit
+                width: Math.max(1, view.width * win.traceScale); height: Math.max(1, view.height * win.traceScale)
+                x: (paperArea.width - width) / 2 + win.traceX; y: (paperArea.height - height) / 2 + win.traceY
+                opacity: win.traceOpacity
+            }
+            Loader {
+                anchors.fill: parent
+                active: win.paper !== "plain"
+                sourceComponent: win.paper === "dots" || win.paper === "cross" ? marks : lines
+            }
+            Item {  // trace mask: masked cells as a light grey (the pen does nothing there)
+                visible: win.maskOn || win.maskEdit
+                x: -paperArea.x + win.maskDX; y: win.maskDY; width: view.width; height: view.height
+                Repeater {
+                    model: win.maskRuns
+                    Rectangle {
+                        x: modelData[1] * view.width / win.maskN; y: modelData[0] * view.height / win.maskN
+                        width: (modelData[2] - modelData[1] + 1) * view.width / win.maskN + 0.5
+                        height: view.height / win.maskN + 0.5
+                        color: win.maskEdit ? "#999999" : "#cccccc"; antialiasing: false
+                    }
+                }
+            }
+            Rectangle {  // mask editing: say what the pen and fingers do now
+                visible: win.maskEdit; anchors.fill: parent; anchors.margins: 6
+                color: "transparent"; border.width: 6; border.color: "black"
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: mhint.width + 40; height: 60
+                    color: "black"; radius: 12
+                    Text { id: mhint; anchors.centerIn: parent; color: "white"; font.pixelSize: 26; font.bold: true
+                           text: "Editing the mask: pen paints, eraser clears, 1 finger moves it" }
+                }
+            }
+            Rectangle {  // while adjusting: a frame says fingers move the image
+                visible: win.traceAdjust; anchors.fill: parent; anchors.margins: 6
+                color: "transparent"; border.width: 6; border.color: "black"
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: hint.width + 40; height: 60
+                    color: "black"; radius: 12
+                    Text { id: hint; anchors.centerIn: parent; color: "white"; font.pixelSize: 26; font.bold: true
+                           text: "Moving the image: 1 finger drags, 2 fingers zoom" }
+                }
+            }
+        }
+        Component {  // families of parallel lines, each rotated about the centre
+            id: lines
+            Item {
+                id: fam
+                readonly property real step: win.paperStep
+                readonly property var sets: win.paper === "lined" ? [[0, step, 2]]
+                    : win.paper === "squared" ? [[0, step, 1], [90, step, 1]]
+                    : win.paper === "blueprint" ? [[0, step, 1], [90, step, 1], [0, step * 5, 3], [90, step * 5, 3]]
+                    : win.paper === "isometric" ? [[0, step * 0.866, 1], [60, step * 0.866, 1], [120, step * 0.866, 1]] : []
+                readonly property real diag: Math.ceil(Math.sqrt(width * width + height * height) / step + 2) * step
+                Repeater {
+                    model: fam.sets
+                    Item {
+                        property var set: modelData
+                        width: fam.diag; height: fam.diag
+                        x: (fam.width - width) / 2; y: (fam.height - height) / 2
+                        rotation: set[0]
+                        Repeater {
+                            model: Math.floor(fam.diag / parent.set[1]) + 1
+                            Rectangle {
+                                y: index * parent.set[1]; width: parent.width; height: parent.set[2]
+                                color: "black"; antialiasing: false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Component {  // a dot or a small cross at every grid point
+            id: marks
+            Item {
+                id: mk
+                readonly property real step: win.paperStep
+                readonly property int cols: Math.floor(width / step) + 1
+                readonly property bool cross: win.paper === "cross"
+                Repeater {
+                    model: mk.cols * (Math.floor(mk.height / mk.step) + 1)
+                    Item {
+                        x: (index % mk.cols) * mk.step; y: Math.floor(index / mk.cols) * mk.step
+                        Rectangle { visible: !mk.cross; x: -2; y: -2; width: 4; height: 4; color: "black"; antialiasing: false }
+                        Rectangle { visible: mk.cross; x: -7; y: -1; width: 14; height: 2; color: "black"; antialiasing: false }
+                        Rectangle { visible: mk.cross; x: -1; y: -7; width: 2; height: 14; color: "black"; antialiasing: false }
+                    }
+                }
+            }
+        }
+
         Item { id: ink; objectName: "ink"; anchors.fill: parent }
 
         Rectangle {  // active area that maps to the monitor
@@ -408,11 +700,33 @@ Window {
                 width: parent.width - win.tabS - 36; spacing: 8
                 Text { text: "PAPER\nTABLET"; font.pixelSize: 22; font.bold: true; font.letterSpacing: 4; color: "black"; lineHeight: 1.1 }
             }
-            Column {
-                x: 22; y: win.tabS + 22; width: parent.width - 44; spacing: 8
-                Text { text: win.status; width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 21; color: "black"; maximumLineCount: 2; elide: Text.ElideRight }
-                Text { text: win.toast; width: parent.width; wrapMode: Text.Wrap; font.pixelSize: 24; font.bold: true; color: "black"; maximumLineCount: 2 }
+            Item {  // profile row: < name >
+                id: prof
+                x: 16; y: win.profY; width: parent.width - 32; height: win.profH
+                property bool many: win.profileCount > 1
+                Rectangle { anchors.fill: parent; radius: 14; border.width: 3; border.color: "black"; color: "white" }
+                Text {
+                    x: prof.many ? 56 : 12; width: parent.width - 2 * x; anchors.verticalCenter: parent.verticalCenter
+                    horizontalAlignment: Text.AlignHCenter; text: win.profileName; font.pixelSize: 26; font.bold: true
+                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 14; elide: Text.ElideRight; color: "black"
+                }
+                Repeater {
+                    model: prof.many ? 2 : 0
+                    Item {  // solid triangles from 2 px rows, like the fold tab
+                        x: index === 0 ? 16 : prof.width - 16 - 22; anchors.verticalCenter: parent.verticalCenter
+                        width: 22; height: 30; rotation: index === 0 ? 180 : 0
+                        Repeater {
+                            model: 15
+                            Rectangle {
+                                property real w: 22 * (1 - Math.abs(index - 7) / 7.5)
+                                y: index * 2; width: w; height: 2; color: "black"; antialiasing: false
+                            }
+                        }
+                    }
+                }
             }
+            Text { x: 22; y: win.profY + win.profH + 8; width: parent.width - 44; text: win.toast || win.status
+                   font.pixelSize: 21; font.bold: win.toast !== ""; color: "black"; elide: Text.ElideRight }
             Repeater {
                 model: win.buttons.length
                 Item {
@@ -421,6 +735,8 @@ Window {
                     property bool none: !b || b.kind === "none"
                     property bool on: win.pressing === index || (b.kind === "hold" && !!win.latched[index])
                                       || (b.kind === "pen" && win.penOut) || (b.kind === "snap" && win.snapOn)
+                                      || (b.kind === "trace" && win.traceAdjust) || (b.kind === "light" && win.lightOn)
+                                      || (b.kind === "mask" && win.maskEdit)
                     x: (index % 2) * win.cellW
                     y: win.headH + Math.floor(index / 2) * win.cellH
                     width: win.cellW; height: win.cellH
@@ -436,7 +752,9 @@ Window {
                                    color: cell.on ? "white" : "black" }
                             Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 18
                                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 12
-                                   text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off") : cell.b.s
+                                   text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off")
+                                       : cell.b.kind === "light" ? (win.lightOn ? "on" : "off")
+                                       : cell.b.kind === "mask" ? (win.maskEdit ? "editing" : win.maskOn ? "on" : "off") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
                                    color: cell.on ? "white" : "black" }
                         }
                     }
@@ -445,7 +763,8 @@ Window {
             Text {
                 x: 22; y: view.height - win.footH + 18; width: parent.width - 44; wrapMode: Text.Wrap
                 font.pixelSize: 19; color: "black"; lineHeight: 1.1
-                text: win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
+                text: win.gesturesOn && win.nativeTouch ? "Fingers work as a touchscreen in Windows: scroll, pinch, tap"
+                    : win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
                                      : "Power button: back to notebooks"
             }
         }
@@ -480,31 +799,42 @@ Window {
             maximumTouchPoints: 10
             onPressed: (pts) => {
                 var changed = false
+                win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i], p = Qt.point(t.x, t.y)
-                    console.warn("LOG:touch " + Math.round(t.x) + "," + Math.round(t.y))
+                    console.warn("LOG:touch " + Math.round(t.x) + "," + Math.round(t.y) + " size " + Math.round(win.touchSize(t)))
                     if (win.inPanel(p)) {  // the panel answers even with the pen hovering: the other hand taps it
                         var tb = win.touchBtn; tb[t.pointId] = win.pressAt(p); win.touchBtn = tb
                         continue
                     }
+                    if (win.palmCheck(t)) { changed = true; continue }
                     var g = win.gPts; g[t.pointId] = {x: t.x, y: t.y}; win.gPts = g
                     var st = win.gStart; st[t.pointId] = {x: t.x, y: t.y}; win.gStart = st
                     changed = true
                 }
-                if (changed) win.fingersChanged()
+                if (changed) { win.fingersChanged(); win.sendTouch() }
             }
             onUpdated: (pts) => {
-                var g = win.gPts, moved = false
+                var g = win.gPts, moved = false, palm = false
+                win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i]
+                    if (g[t.pointId] && win.palmCheck(t)) { palm = true; continue }
                     if (g[t.pointId]) { g[t.pointId] = {x: t.x, y: t.y}; moved = true }
                 }
-                if (moved) { win.gPts = g; win.fingersMoved() }
+                if (palm) { win.fingersChanged(); win.sendTouch(); return }
+                if (moved) { win.gPts = g; win.fingersMoved(); win.sendTouch() }
             }
             onReleased: (pts) => {
                 var g = win.gPts, changed = false
+                win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i]
+                    if (win.palms[t.pointId]) {
+                        var pl = win.palms; delete pl[t.pointId]; win.palms = pl
+                        if (Object.keys(g).length === 0) changed = true
+                        continue
+                    }
                     if (t.pointId in win.touchBtn) {
                         var tb = win.touchBtn
                         if (tb[t.pointId] >= 0) win.releaseBtn(tb[t.pointId], false)
@@ -516,9 +846,9 @@ Window {
                         delete g[t.pointId]; changed = true
                     }
                 }
-                if (changed) { win.gPts = g; win.fingersChanged() }
+                if (changed) { win.gPts = g; win.fingersChanged(); win.sendTouch() }
             }
-            onCanceled: (pts) => { win.endGesture(); win.gPts = ({}); win.fingersChanged(); win.pressing = -1 }
+            onCanceled: (pts) => { win.endGesture(); win.gPts = ({}); win.palms = ({}); win.fingersChanged(); win.sendTouch(); win.pressing = -1 }
         }
 
         Repeater {  // 9 calibration crosshairs, reading order, 10% inset (matches the PDF sheet)

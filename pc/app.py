@@ -53,7 +53,7 @@ def saved_theme():
             theme = json.load(f).get("gui", {}).get("theme")
     except (OSError, ValueError):
         theme = None
-    return theme if theme in THEME_BG else "default"
+    return theme if theme in THEME_BG else "intaglio"
 
 
 def place_window(title, width, height):
@@ -161,6 +161,16 @@ class Api:
         elif sys.platform.startswith("linux"):
             import subprocess
             subprocess.Popen(["xdg-open", os.path.dirname(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return path
+
+    def pick_trace_image(self):
+        """File dialog for the tracing image; the chosen path, or None."""
+        kinds = ("Images (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp)", "All files (*.*)")
+        got = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=kinds)
+        if not got:
+            return None
+        path = got[0] if isinstance(got, (list, tuple)) else got
+        self._engine.set("trace_file", path)
         return path
 
     def open_url(self, url):

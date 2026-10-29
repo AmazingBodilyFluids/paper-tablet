@@ -1,8 +1,10 @@
 """Panel buttons, key combinations and tablet actions (no Windows, no tablet needed)."""
+import threading
 import types
 import unittest
 
 import core
+import rmtablet as rt
 import keys
 
 
@@ -150,6 +152,113 @@ class TabletActions(unittest.TestCase):
         e.tablet_action("pen 1")
         e.tablet_action("snap 0")
         self.assertEqual(e.settings, [("panel_open", False), ("output", True), ("snap", False)])
+
+
+class Profiles(unittest.TestCase):
+    def engine(self, cfg=None):
+        e = bare_engine(cfg)
+        core.load_profiles(e.cfg)
+        e.set = core.Engine.set.__get__(e)
+        e.lock = threading.RLock()
+        e.refresh_mapper = e.save = e.sync_companion = lambda: None
+        e.worker = None
+        e.companion = types.SimpleNamespace(running=True, lines=[])
+        e.companion.send = e.companion.lines.append
+        e.companion.light = lambda on: None
+        return e
+
+    def test_old_layout_becomes_first_profile(self):
+        mine = core.clean_buttons([{"t": "Mine", "kind": "shortcut", "keys": "m"}])
+        e = self.engine({"panel_buttons": mine})
+        self.assertEqual(len(e.cfg["panel_profiles"]), 1)
+        self.assertEqual(e.cfg["panel_profiles"][0]["buttons"], mine)
+        self.assertEqual(e.buttons(), mine)
+
+    def test_cycle_switches_buttons_and_wraps(self):
+        a = core.clean_buttons([{"t": "A", "kind": "shortcut", "keys": "a"}])
+        b = core.clean_buttons([{"t": "B", "kind": "hold", "keys": "b"}])
+        e = self.engine({"panel_profiles": [{"name": "PS", "buttons": a}, {"name": "Krita", "buttons": b}]})
+        e.tablet_action("press 0")
+        self.assertEqual(e.sent[0], (0x41, False))  # A
+        e.keys.down("shift")
+        e.tablet_action("profile next")
+        self.assertEqual(e.cfg["panel_profile"], 1)
+        self.assertEqual(e.keys.held, set())  # held keys let go on a switch
+        self.assertIn("toast Krita", e.companion.lines)
+        e.tablet_action("press 0")
+        self.assertEqual(e.keys.held, {"b"})
+        e.tablet_action("profile next")
+        self.assertEqual(e.cfg["panel_profile"], 0)  # wraps round
+        e.tablet_action("profile prev")
+        self.assertEqual(e.cfg["panel_profile"], 1)
+
+    def test_editing_buttons_edits_the_active_profile(self):
+        e = self.engine({"panel_profiles": [{"name": "One"}, {"name": "Two"}], "panel_profile": 1})
+        e.set("panel_buttons", [{"t": "X", "kind": "shortcut", "keys": "x"}])
+        self.assertEqual(e.cfg["panel_profiles"][1]["buttons"][0]["t"], "X")
+        self.assertEqual(e.cfg["panel_profiles"][0]["buttons"], core.clean_buttons(None))
+
+    def test_deleting_profiles_keeps_a_valid_selection(self):
+        e = self.engine({"panel_profiles": [{"name": "One"}, {"name": "Two"}], "panel_profile": 1})
+        e.set("panel_profiles", [{"name": "  Only   one ", "buttons": []}])
+        self.assertEqual(e.cfg["panel_profile"], 0)
+        self.assertEqual(e.cfg["panel_profiles"][0]["name"], "Only one")
+        e.set("panel_profiles", [])
+        self.assertEqual(len(e.cfg["panel_profiles"]), 1)  # never none
+
+
+class PaperAndTrace(Profiles):
+    def test_tablet_moves_the_image_and_buttons_toggle(self):
+        e = self.engine()
+        e.tablet_action("trace 120.5 -40 2.5")
+        self.assertEqual((e.cfg["trace_x"], e.cfg["trace_y"], e.cfg["trace_scale"]), (120.5, -40.0, 2.5))
+        e.tablet_action("traceadjust")
+        e.tablet_action("light")
+        self.assertTrue(e.cfg["trace_adjust"])
+        self.assertTrue(e.cfg["light"])
+
+    def test_values_are_clamped(self):
+        e = self.engine()
+        e.set("paper", "nonsense")
+        e.set("paper_mm", 100)
+        e.set("trace_opacity", 0)
+        self.assertEqual((e.cfg["paper"], e.cfg["paper_mm"], e.cfg["trace_opacity"]), ("plain", 30.0, 0.05))
+
+    def test_new_button_kinds_survive_cleaning(self):
+        b = core.clean_buttons([{"t": "Image", "kind": "trace"}, {"t": "Light", "kind": "light"}])
+        self.assertEqual([x["kind"] for x in b[:2]], ["trace", "light"])
+
+
+class TraceMask(Profiles):
+    def state(self, x, y):
+        return rt.PenState(x=x, y=y, pen=True)
+
+    def test_mask_round_trip_and_hit_test(self):
+        e = self.engine()
+        e.mapper = rt.Mapper(absinfo={"X": {"min": 0, "max": 7199}, "Y": {"min": 0, "max": 7199},
+                                      "PRESSURE": {"min": 0, "max": 4096}}, monitor=(0, 0, 1920, 1080), fit="stretch")
+        e.cal = None
+        bits = bytearray(core.MASK_N * core.MASK_N)
+        bits[0] = 1                      # top-left cell
+        bits[10 * core.MASK_N + 20] = 1  # row 10, column 20
+        h = "".join(f"{(bits[i] << 3) | (bits[i+1] << 2) | (bits[i+2] << 1) | bits[i+3]:x}" for i in range(0, len(bits), 4))
+        e.tablet_action("mask " + h)
+        self.assertTrue(e.cfg["mask_on"])  # painting a mask switches it on
+        self.assertEqual(core.mask_bits(e.cfg["mask"]), bytes(bits))
+        self.assertTrue(e.masked(self.state(50, 50)))
+        self.assertTrue(e.masked(self.state(20 * 100 + 50, 10 * 100 + 50)))
+        self.assertFalse(e.masked(self.state(21 * 100 + 50, 10 * 100 + 50)))
+        e.set("mask_on", False)
+        self.assertFalse(e.masked(self.state(50, 50)))
+
+    def test_editing_keeps_the_pen_from_windows(self):
+        e = self.engine({"mask_edit": True})
+        e.mapper, e.cal = object(), None
+        self.assertTrue(e.masked(self.state(1, 1)))
+
+    def test_bad_masks_are_cleaned(self):
+        self.assertEqual(len(core.clean_mask("zz12")), core.MASK_N * core.MASK_N // 4)
+        self.assertEqual(core.clean_mask("F")[0], "f")
 
 
 class PanelGeometry(unittest.TestCase):
