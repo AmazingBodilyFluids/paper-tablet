@@ -160,6 +160,16 @@ class Api:
             os.startfile(os.path.dirname(path))  # noqa: S606 (opens the folder in Explorer)
         return path
 
+    def pick_trace_image(self):
+        """File dialog for the tracing image; the chosen path, or None."""
+        kinds = ("Images (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp)", "All files (*.*)")
+        got = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=kinds)
+        if not got:
+            return None
+        path = got[0] if isinstance(got, (list, tuple)) else got
+        self._engine.set("trace_file", path)
+        return path
+
     def open_url(self, url):
         if url.startswith("https://"):
             import webbrowser

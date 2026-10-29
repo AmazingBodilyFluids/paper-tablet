@@ -31,6 +31,9 @@ handle undo, redo, pan and zoom.
   combination. A button can tap its keys or hold them (for Space-to-pan, Alt-to-pick and the like).
   The panel folds away from its corner tab when you want the whole surface. Keep as many named button sets
   (profiles) as you like, for example one per app, and switch with the arrows at the top of the panel.
+- **Paper and tracing on the tablet screen.** Lined, squared, dot, cross, blueprint or isometric paper under
+  your strokes, and a tracing image you can move and zoom with your fingers. The front light can go to full
+  while you trace, and comes back to your level afterwards.
 - **Finger gestures:**
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.

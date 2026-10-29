@@ -48,6 +48,10 @@ DEFAULTS = {
     "panel_buttons": None,  # filled from DEFAULT_BUTTONS below; always the active profile's buttons
     # named button sets, cycled with the arrows on the tablet panel: [{"name", "buttons"}]
     "panel_profiles": None, "panel_profile": 0,
+    # the tablet screen under the ink: paper pattern, a tracing image, the front light
+    "paper": "plain", "paper_mm": 5.0,
+    "trace_file": "", "trace_opacity": 0.5, "trace_scale": 1.0, "trace_x": 0.0, "trace_y": 0.0,
+    "trace_adjust": False, "light": False,
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
     "taps": None,           # tap gestures, filled from DEFAULT_TAPS below
@@ -77,7 +81,11 @@ TAP_SLOTS = {"1x2": "One finger, double tap", "1x3": "One finger, triple tap", "
 DEFAULT_TAPS = {"1x2": {"t": "", "keys": ""}, "1x3": {"t": "New layer", "keys": "ctrl+shift+alt+n"},
                 "2x1": {"t": "", "keys": ""}, "2x2": {"t": "", "keys": ""}, "3x1": {"t": "", "keys": ""}}
 DEFAULTS["taps"] = DEFAULT_TAPS
-BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "none")
+BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "trace", "light", "none")
+PAPERS = ("plain", "lined", "squared", "dots", "cross", "blueprint", "isometric")
+PANEL_PX_PER_MM = 2160 / 239.6  # Paper Pro: 1620 x 2160 px on a 179.7 x 239.6 mm panel (229 ppi)
+TRACE_MAX_BYTES = 30 * 1024 * 1024
+FRONTLIGHT = "/sys/class/backlight/rm_frontlight"
 
 
 def clean_profiles(profiles, current=None):
@@ -269,8 +277,41 @@ class Companion:
     def __init__(self, engine):
         self.engine = engine
         self.chan = None
+        self.tab = None
+        self.trace_sent = None  # (path, mtime, size) of the image on the tablet
         self.log = collections.deque(maxlen=300)
         self.started_at = 0
+
+    def trace_remote(self, path):
+        """Copy the tracing image to the tablet (once per file version); its path there, or ""."""
+        if not path or not self.tab:
+            return ""
+        try:
+            st = os.stat(path)
+        except OSError:
+            return ""
+        if st.st_size > TRACE_MAX_BYTES:
+            return ""
+        key = (path, st.st_mtime, st.st_size)
+        ext = os.path.splitext(path)[1].lower()[:5] or ".img"
+        remote = f"{self.REMOTE}/trace{ext}"
+        if self.trace_sent != key:
+            with open(path, "rb") as f:
+                self.tab.run(f"cat > {remote}", f.read())
+            self.trace_sent = key
+        return remote
+
+    def light(self, on):
+        """Front light to full, or back to what it was when the screen was taken over
+        (run.sh saved that, and puts it back itself however the session ends)."""
+        if not self.tab:
+            return
+        cmd = (f"cat {FRONTLIGHT}/max_brightness > {FRONTLIGHT}/brightness" if on else
+               f"[ -f /tmp/rmpp-companion.lock/light ] && cat /tmp/rmpp-companion.lock/light > {FRONTLIGHT}/brightness")
+        try:
+            self.tab.run(cmd)
+        except Exception:
+            pass
 
     @property
     def running(self):
@@ -280,6 +321,7 @@ class Companion:
         if self.running or time.time() - self.started_at < 4:
             return  # one hand-over at a time: overlapping sessions fight over the panel
         self.started_at = time.time()
+        self.tab, self.trace_sent = tab, None
         src = os.path.join(rt.HERE, "..", "tablet", "companion")
         tab.run(f"mkdir -p {self.REMOTE}")
         for name in self.FILES:
@@ -310,6 +352,8 @@ class Companion:
         if "first frame drawn" in line:
             self.engine.refresh_mapper()  # the side panel now takes part of the tablet
             self.engine.sync_companion()
+            if self.engine.cfg.get("light"):
+                threading.Thread(target=self.light, args=(True,), daemon=True).start()
             self.engine.changed()
         if line == "companion: closed":
             self.engine.mouse.end()
@@ -600,14 +644,28 @@ class Engine:
                     val = DEFAULTS["rotate_keys"]
             if key == "swipe_step":
                 val = max(40, min(400, int(val)))
+            if key == "paper" and val not in PAPERS:
+                val = "plain"
+            if key == "paper_mm":
+                val = max(2.0, min(30.0, float(val)))
+            if key in ("trace_opacity",):
+                val = max(0.05, min(1.0, float(val)))
+            if key == "trace_scale":
+                val = max(0.05, min(20.0, float(val)))
+            if key in ("trace_x", "trace_y"):
+                val = float(val)
             self.cfg[key] = val
             self.refresh_mapper()
             self.save()
         if key in ("companion_rot", "panel", "panel_open"):
             self.refresh_mapper()
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
-                   "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile"):
+                   "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
+                   "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
+                   "trace_adjust", "light"):
             self.sync_companion()
+        if key == "light" and self.companion.running:
+            threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
         if key == "panel_profile" and self.companion.running:
             self.companion.send("unlatch")
             self.companion.send("toast " + self.cfg["panel_profiles"][self.cfg["panel_profile"]]["name"])
@@ -662,7 +720,7 @@ class Engine:
         for b in self.buttons():
             kind = {"shortcut": "tap", "clear": "local"}.get(b["kind"], b["kind"])
             sub = {"shortcut": keys.label(b["keys"]), "hold": "holds " + keys.label(b["keys"]),
-                   "clear": "tablet ink"}.get(b["kind"], "")
+                   "clear": "tablet ink", "trace": "image"}.get(b["kind"], "")
             out.append({"t": b["t"], "s": sub, "kind": kind})
         return out
 
@@ -715,6 +773,15 @@ class Engine:
             self.keys.combo(keys.SHORTCUTS[name])
         elif name == "panel":
             self.set("panel_open", arg == "1")
+        elif name == "trace" and len(parts) == 4:  # the image was moved / zoomed on the tablet
+            with self.lock:
+                self.cfg["trace_x"], self.cfg["trace_y"] = float(parts[1]), float(parts[2])
+                self.cfg["trace_scale"] = max(0.05, min(20.0, float(parts[3])))
+                self.save()
+        elif name == "traceadjust":
+            self.set("trace_adjust", not self.cfg.get("trace_adjust"))
+        elif name == "light":
+            self.set("light", not self.cfg.get("light"))
         elif name == "profile" and arg in ("next", "prev"):
             self.set("panel_profile", self.cfg["panel_profile"] + (1 if arg == "next" else -1))
         elif name == "pen":
@@ -1025,7 +1092,16 @@ class Engine:
         c.send(f"profile {self.cfg['panel_profile']} {len(profs)} {profs[self.cfg['panel_profile']]['name']}")
         c.send("area " + " ".join(f"{a:.4f}" for a in self.effective_area()))
         c.send(f"fade {int(self.cfg['trail_ms'])}")
-        c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))}")
+        c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))} light {int(bool(self.cfg.get('light')))}")
+        c.send(f"paper {self.cfg.get('paper', 'plain')} {float(self.cfg.get('paper_mm', 5)) * PANEL_PX_PER_MM:.1f}")
+        try:
+            remote = c.trace_remote(self.cfg.get("trace_file"))
+        except Exception as ex:
+            remote = ""
+            c.send(f"toast Tracing image not sent: {ex}")
+        c.send(f"trace {float(self.cfg['trace_opacity']):.2f} {float(self.cfg['trace_scale']):.4f} "
+               f"{float(self.cfg['trace_x']):.1f} {float(self.cfg['trace_y']):.1f} {remote}")
+        c.send(f"traceadjust {int(bool(self.cfg.get('trace_adjust')) and bool(remote))}")
         c.send("status Connected to PC. Pen " + ("on" if self.output_on else "off")
                + (", shapes on" if self.cfg.get("snap") else ""))
         if self.cal is not None:

@@ -163,6 +163,7 @@ class Profiles(unittest.TestCase):
         e.worker = None
         e.companion = types.SimpleNamespace(running=True, lines=[])
         e.companion.send = e.companion.lines.append
+        e.companion.light = lambda on: None
         return e
 
     def test_old_layout_becomes_first_profile(self):
@@ -203,6 +204,28 @@ class Profiles(unittest.TestCase):
         self.assertEqual(e.cfg["panel_profiles"][0]["name"], "Only one")
         e.set("panel_profiles", [])
         self.assertEqual(len(e.cfg["panel_profiles"]), 1)  # never none
+
+
+class PaperAndTrace(Profiles):
+    def test_tablet_moves_the_image_and_buttons_toggle(self):
+        e = self.engine()
+        e.tablet_action("trace 120.5 -40 2.5")
+        self.assertEqual((e.cfg["trace_x"], e.cfg["trace_y"], e.cfg["trace_scale"]), (120.5, -40.0, 2.5))
+        e.tablet_action("traceadjust")
+        e.tablet_action("light")
+        self.assertTrue(e.cfg["trace_adjust"])
+        self.assertTrue(e.cfg["light"])
+
+    def test_values_are_clamped(self):
+        e = self.engine()
+        e.set("paper", "nonsense")
+        e.set("paper_mm", 100)
+        e.set("trace_opacity", 0)
+        self.assertEqual((e.cfg["paper"], e.cfg["paper_mm"], e.cfg["trace_opacity"]), ("plain", 30.0, 0.05))
+
+    def test_new_button_kinds_survive_cleaning(self):
+        b = core.clean_buttons([{"t": "Image", "kind": "trace"}, {"t": "Light", "kind": "light"}])
+        self.assertEqual([x["kind"] for x in b[:2]], ["trace", "light"])
 
 
 class PanelGeometry(unittest.TestCase):

@@ -46,6 +46,17 @@ Window {
     readonly property real profY: tabS + 10   // the profile row: arrows either side of its name
     readonly property real profH: 72
     property string profileName: ""
+    // paper under the ink: plain | lined | squared | dots | cross | blueprint | isometric
+    property string paper: "plain"
+    property real paperStep: 45          // px between lines (the PC converts from mm)
+    // tracing image under the ink: file on the tablet, its scale and offset in view pixels
+    property string traceSrc: ""
+    property real traceScale: 1
+    property real traceX: 0
+    property real traceY: 0
+    property real traceOpacity: 0.5
+    property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
+    property bool lightOn: false
     property int profileCount: 1
     readonly property real footH: 190
     readonly property int rows: 8
@@ -87,6 +98,14 @@ Window {
         else if (c === "snap") snap(a)
         else if (c === "panel") { panelSide = a[0]; if (a.length > 1) panelFrac = parseFloat(a[1]) }
         else if (c === "panelopen") panelOpen = a[0] === "1"
+        else if (c === "paper") { paper = a[0]; if (a.length > 1) paperStep = Math.max(12, parseFloat(a[1])) }
+        else if (c === "trace") {  // trace <opacity> <scale> <x> <y> <file or empty>
+            traceOpacity = parseFloat(a[0]); traceScale = parseFloat(a[1])
+            traceX = parseFloat(a[2]); traceY = parseFloat(a[3])
+            var src = a.slice(4).join(" ")
+            traceSrc = src ? "file://" + src : ""
+        }
+        else if (c === "traceadjust") traceAdjust = a[0] === "1"
         else if (c === "profile") { profileCount = parseInt(a[1]); profileName = a.slice(2).join(" ") }
         else if (c === "gestures") {
             gesturesOn = a[0] === "1"
@@ -98,6 +117,7 @@ Window {
             for (var i = 0; i + 1 < a.length; i += 2) {
                 if (a[i] === "pen") penOut = a[i + 1] === "1"
                 else if (a[i] === "snap") snapOn = a[i + 1] === "1"
+                else if (a[i] === "light") lightOn = a[i + 1] === "1"
             }
         } else if (c === "unlatch") latched = ({})
     }
@@ -180,6 +200,8 @@ Window {
         else if (b.kind === "pen") { penOut = !penOut; act("pen " + (penOut ? 1 : 0)); say(penOut ? "Pen on" : "Pen off") }
         else if (b.kind === "snap") { snapOn = !snapOn; act("snap " + (snapOn ? 1 : 0)); say(snapOn ? "Shapes on" : "Shapes off") }
         else if (b.kind === "local") { clearInk() }
+        else if (b.kind === "trace") { act("traceadjust") }
+        else if (b.kind === "light") { act("light") }
         else if (b.kind === "hold") {
             if (latched[i]) { act("release " + i); setLatch(i, false); keepLatch = false; say(b.t + " released") }
             else { act("press " + i); setLatch(i, true); keepLatch = true; holdStart = Date.now() }
@@ -326,7 +348,26 @@ Window {
         }
     }
     Timer { id: tapTimer; interval: 330; onTriggered: { if (win.tapK > 0) win.act("tap " + win.tapN + " " + win.tapK); win.tapK = 0 } }
+    // Adjusting the tracing image: one finger drags it, two zoom it (about its centre).
+    property var adj: null         // {c, d, x, y, s} where the current finger count began
+    function adjustChanged() {
+        var l = gList(), n = l.length
+        if (n === 0) {
+            if (adj) act("trace " + traceX.toFixed(1) + " " + traceY.toFixed(1) + " " + traceScale.toFixed(4))
+            adj = null; gMode = ""; gMax = 0; return
+        }
+        adj = {c: centroid(l), d: n > 1 ? spread(l) : 0, x: traceX, y: traceY, s: traceScale}
+    }
+    function adjustMoved() {
+        var l = gList()
+        if (!adj || !l.length) return
+        var c = centroid(l)
+        traceX = adj.x + c.x - adj.c.x
+        traceY = adj.y + c.y - adj.c.y
+        if (l.length > 1 && adj.d > 20) traceScale = Math.max(0.05, Math.min(20, adj.s * spread(l) / adj.d))
+    }
     function fingersChanged() {
+        if (traceAdjust) { adjustChanged(); return }
         var l = gList(), n = l.length
         gMax = Math.max(gMax, n)
         if (n === 0) {
@@ -355,6 +396,7 @@ Window {
         }
     }
     function fingersMoved() {
+        if (traceAdjust) { adjustMoved(); return }
         var l = gList()
         for (var id in gPts) {
             var a = gPts[id], b = gStart[id]
@@ -431,6 +473,88 @@ Window {
         anchors.centerIn: parent
         rotation: rot * 90
 
+        // ------------------------------------------------ paper and tracing image, under the ink
+        // Drawn once as plain black items: crisp 1-3 px lines stay sharp on e-ink, where
+        // grey or anti-aliased strokes dither. Only the drawing area, never under the panel.
+        Item {
+            id: paperArea
+            visible: win.mode === "ink"
+            x: win.panelSide === "left" ? win.panelW : 0
+            width: view.width - win.panelW; height: view.height
+            clip: true
+            Image {
+                visible: win.traceSrc !== ""
+                source: win.traceSrc
+                asynchronous: true; cache: false; smooth: true
+                sourceSize.width: 2400; sourceSize.height: 2400   // keep memory sane for huge photos
+                fillMode: Image.PreserveAspectFit
+                width: Math.max(1, view.width * win.traceScale); height: Math.max(1, view.height * win.traceScale)
+                x: (paperArea.width - width) / 2 + win.traceX; y: (paperArea.height - height) / 2 + win.traceY
+                opacity: win.traceOpacity
+            }
+            Loader {
+                anchors.fill: parent
+                active: win.paper !== "plain"
+                sourceComponent: win.paper === "dots" || win.paper === "cross" ? marks : lines
+            }
+            Rectangle {  // while adjusting: a frame says fingers move the image
+                visible: win.traceAdjust; anchors.fill: parent; anchors.margins: 6
+                color: "transparent"; border.width: 6; border.color: "black"
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter; y: 24; width: hint.width + 40; height: 60
+                    color: "black"; radius: 12
+                    Text { id: hint; anchors.centerIn: parent; color: "white"; font.pixelSize: 26; font.bold: true
+                           text: "Moving the image: 1 finger drags, 2 fingers zoom" }
+                }
+            }
+        }
+        Component {  // families of parallel lines, each rotated about the centre
+            id: lines
+            Item {
+                id: fam
+                readonly property real step: win.paperStep
+                readonly property var sets: win.paper === "lined" ? [[0, step, 2]]
+                    : win.paper === "squared" ? [[0, step, 1], [90, step, 1]]
+                    : win.paper === "blueprint" ? [[0, step, 1], [90, step, 1], [0, step * 5, 3], [90, step * 5, 3]]
+                    : win.paper === "isometric" ? [[0, step * 0.866, 1], [60, step * 0.866, 1], [120, step * 0.866, 1]] : []
+                readonly property real diag: Math.ceil(Math.sqrt(width * width + height * height) / step + 2) * step
+                Repeater {
+                    model: fam.sets
+                    Item {
+                        property var set: modelData
+                        width: fam.diag; height: fam.diag
+                        x: (fam.width - width) / 2; y: (fam.height - height) / 2
+                        rotation: set[0]
+                        Repeater {
+                            model: Math.floor(fam.diag / parent.set[1]) + 1
+                            Rectangle {
+                                y: index * parent.set[1]; width: parent.width; height: parent.set[2]
+                                color: "black"; antialiasing: false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Component {  // a dot or a small cross at every grid point
+            id: marks
+            Item {
+                id: mk
+                readonly property real step: win.paperStep
+                readonly property int cols: Math.floor(width / step) + 1
+                readonly property bool cross: win.paper === "cross"
+                Repeater {
+                    model: mk.cols * (Math.floor(mk.height / mk.step) + 1)
+                    Item {
+                        x: (index % mk.cols) * mk.step; y: Math.floor(index / mk.cols) * mk.step
+                        Rectangle { visible: !mk.cross; x: -2; y: -2; width: 4; height: 4; color: "black"; antialiasing: false }
+                        Rectangle { visible: mk.cross; x: -7; y: -1; width: 14; height: 2; color: "black"; antialiasing: false }
+                        Rectangle { visible: mk.cross; x: -1; y: -7; width: 2; height: 14; color: "black"; antialiasing: false }
+                    }
+                }
+            }
+        }
+
         Item { id: ink; objectName: "ink"; anchors.fill: parent }
 
         Rectangle {  // active area that maps to the monitor
@@ -487,6 +611,7 @@ Window {
                     property bool none: !b || b.kind === "none"
                     property bool on: win.pressing === index || (b.kind === "hold" && !!win.latched[index])
                                       || (b.kind === "pen" && win.penOut) || (b.kind === "snap" && win.snapOn)
+                                      || (b.kind === "trace" && win.traceAdjust) || (b.kind === "light" && win.lightOn)
                     x: (index % 2) * win.cellW
                     y: win.headH + Math.floor(index / 2) * win.cellH
                     width: win.cellW; height: win.cellH
@@ -502,7 +627,8 @@ Window {
                                    color: cell.on ? "white" : "black" }
                             Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 18
                                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 12
-                                   text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off") : cell.b.s
+                                   text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off")
+                                       : cell.b.kind === "light" ? (win.lightOn ? "on" : "off") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
                                    color: cell.on ? "white" : "black" }
                         }
                     }

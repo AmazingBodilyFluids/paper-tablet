@@ -16,6 +16,9 @@ if ! mkdir "$LOCK" 2>/dev/null; then
     rm -rf "$LOCK"; mkdir "$LOCK" || exit 3
 fi
 echo $$ > "$LOCK/pid"
+# The PC may turn the front light to full (light-pad mode); this is what to put back.
+FL=/sys/class/backlight/rm_frontlight
+cat "$FL/brightness" > "$LOCK/light" 2>/dev/null
 restore() {
     trap - EXIT INT TERM HUP
     # $APP is the tee at the end of the pipe, so stop the app itself by name too.
@@ -28,6 +31,8 @@ restore() {
         systemctl start xochitl || { sleep 2; systemctl reset-failed xochitl; systemctl start xochitl; }
     fi
     { echo rmpp-companion > /sys/power/wake_unlock; } 2>/dev/null
+    [ -s "$LOCK/light" ] && cat "$LOCK/light" > "$FL/brightness" 2>/dev/null
+    rm -f "$DIR"/trace.*
     rm -rf "$LOCK"
     echo "companion: screen returned to xochitl"
 }

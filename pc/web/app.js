@@ -121,6 +121,11 @@ function render() {
   }
   $("#gammaV").textContent = (+S.cfg.gamma).toFixed(2);
   $("#threshV").textContent = Math.round(S.cfg.threshold * 100) + "%";
+  $("#paperV").textContent = (+S.cfg.paper_mm).toFixed(1).replace(/\.0$/, "") + " mm";
+  $("#traceV").textContent = Math.round(S.cfg.trace_opacity * 100) + "%";
+  const tf = S.cfg.trace_file || "";
+  $("#traceName").textContent = tf ? tf.split(/[\\/]/).pop() : "None. Show a photo or sketch under your strokes to trace over.";
+  $("#traceDel").disabled = !tf;
   $("#trailV").textContent = S.cfg.trail_ms ? (S.cfg.trail_ms / 1000).toFixed(S.cfg.trail_ms % 1000 ? 2 : 0) + " s" : "keep";
   $("#fitHint").textContent = {
     crop: "The whole display is reachable; a slice of the tablet goes unused if the shapes differ.",
@@ -208,6 +213,8 @@ document.addEventListener("input", e => {
     paintRange(el);
     const v = el.dataset.type === "int" ? parseInt(el.value, 10) : parseFloat(el.value);
     S.cfg[el.dataset.key] = v;
+    if (el.dataset.key === "paper_mm") $("#paperV").textContent = v.toFixed(1).replace(/\.0$/, "") + " mm";
+    if (el.dataset.key === "trace_opacity") $("#traceV").textContent = Math.round(v * 100) + "%";
     if (el.dataset.key === "gamma") $("#gammaV").textContent = v.toFixed(2);
     if (el.dataset.key === "threshold") $("#threshV").textContent = Math.round(v * 100) + "%";
     drawCurve();
@@ -739,7 +746,7 @@ const Panel = {
     ["Fit", "shortcut", "ctrl+0"], ["Move", "shortcut", "v"], ["Lasso", "shortcut", "l"], ["Fill", "shortcut", "g"],
     ["Swap col", "shortcut", "x"], ["Deselect", "shortcut", "ctrl+d"], ["Transform", "shortcut", "ctrl+t"],
     ["New layer", "shortcut", "ctrl+shift+n"], ["Copy", "shortcut", "ctrl+c"], ["Paste", "shortcut", "ctrl+v"],
-    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""],
+    ["Pen", "pen", ""], ["Shapes", "snap", ""], ["Clear", "clear", ""], ["Move image", "trace", ""], ["Light", "light", ""],
   ],
 
   label(spec) {
@@ -758,6 +765,8 @@ const Panel = {
     if (b.kind === "pen") return S.output ? "on" : "off";
     if (b.kind === "snap") return S.cfg.snap ? "on" : "off";
     if (b.kind === "clear") return "tablet ink";
+    if (b.kind === "trace") return S.cfg.trace_adjust ? "moving" : "image";
+    if (b.kind === "light") return S.cfg.light ? "on" : "off";
     return "";
   },
 
@@ -767,7 +776,7 @@ const Panel = {
     if (!this.btns || (!this.dirty && saved !== JSON.stringify(this.btns))) this.btns = JSON.parse(saved);
     if (view !== "panel") return;
     this.renderProfiles();
-    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap]);
+    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.cfg.light, S.cfg.trace_adjust]);
     if (sig !== this.sig) { this.sig = sig; this.draw(); }
     if (!this.recording && document.activeElement !== $("#peName") && document.activeElement !== $("#peKeys")) this.fill();
     this.renderTaps();
@@ -1048,6 +1057,8 @@ const Panel = {
       if (k === "pen" && !b.t) patch.t = "Pen";
       if (k === "snap" && !b.t) patch.t = "Shapes";
       if (k === "clear" && !b.t) patch.t = "Clear";
+      if (k === "trace" && !b.t) patch.t = "Image";
+      if (k === "light" && !b.t) patch.t = "Light";
       if (k === "none") patch.t = "";
       this.edit(patch);
     };
@@ -1063,3 +1074,14 @@ const Panel = {
   },
 };
 Panel.init();
+
+// ------------------------------------------------------------------ tracing image
+async function pickTrace() {
+  const path = await api().pick_trace_image();
+  if (path) { await resetTrace(); toast("Tracing image sent to the tablet."); }
+  refresh();
+}
+async function resetTrace() {
+  for (const [k, v] of [["trace_x", 0], ["trace_y", 0], ["trace_scale", 1]]) await setKey(k, v);
+  refresh();
+}

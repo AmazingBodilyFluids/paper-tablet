@@ -243,9 +243,27 @@
           <p class="hint mts">Fingers are ignored while the pen is near the screen, so a resting hand does nothing. <span id="lastAction"></span></p>
           <div class="row mt"><button class="btn" onclick="api().clear_ink()">Clear the tablet screen</button></div>
         </div>
+        <div class="stack">
+        <div class="pane">
+          <div class="pane-title">Paper and tracing</div>
+          <div class="opt"><div class="tx"><div class="t1">Paper</div><div class="t2">Printed under your strokes, on the drawing area only</div></div>
+            <select class="input" data-key="paper" style="width:170px">
+              <option value="plain">Plain</option><option value="lined">Lined</option><option value="squared">Squared</option>
+              <option value="dots">Dots</option><option value="cross">Crosses</option><option value="blueprint">Blueprint (5 × 5)</option>
+              <option value="isometric">Isometric</option></select></div>
+          <div class="opt" style="display:block"><div class="range-row"><span>Line spacing</span><input type="range" min="3" max="15" step="0.5" data-key="paper_mm" data-type="float"><span class="v" id="paperV"></span></div></div>
+          <div class="opt"><div class="tx"><div class="t1">Tracing image</div><div class="t2" id="traceName">None. Show a photo or sketch under your strokes to trace over.</div></div>
+            <div class="row"><button class="btn" onclick="pickTrace()">Choose…</button><button class="btn ghost" id="traceDel" onclick="setKey('trace_file','').then(refresh)">Remove</button></div></div>
+          <div class="opt" style="display:block"><div class="range-row"><span>Image strength</span><input type="range" min="0.1" max="1" step="0.05" data-key="trace_opacity" data-type="float"><span class="v" id="traceV"></span></div></div>
+          <div class="opt"><div class="tx"><div class="t1">Move and zoom it on the tablet</div><div class="t2">While on, one finger drags the image and two fingers zoom it; gestures pause. A panel button can do this too ("Move image").</div></div>
+            <div class="row"><button class="btn ghost" onclick="resetTrace()">Centre</button><span class="switch"><input type="checkbox" data-key="trace_adjust"><span class="track"></span></span></div></div>
+          <div class="opt"><div class="tx"><div class="t1">Front light to full</div><div class="t2">Lights the screen evenly for tracing. It's a front light, so it lights the image on screen rather than shining through paper laid on top. Your light level comes back when the tablet screen turns off.</div></div>
+            <span class="switch"><input type="checkbox" data-key="light"><span class="track"></span></span></div>
+        </div>
         <div class="pane">
           <div class="pane-title">Tablet log</div>
           <div class="log" id="scrLog"></div>
+        </div>
         </div>
       </div>
     </section>
@@ -281,6 +299,8 @@
                 <button data-k="pen"><b>Pen on/off</b><span>Pauses the pen in Windows</span></button>
                 <button data-k="snap"><b>Shapes on/off</b><span>Hold-to-snap shapes</span></button>
                 <button data-k="clear"><b>Clear ink</b><span>Only useful if trails are set to stay</span></button>
+                <button data-k="trace"><b>Move image</b><span>Fingers move and zoom the tracing image</span></button>
+                <button data-k="light"><b>Light on/off</b><span>Front light to full for tracing</span></button>
                 <button data-k="none"><b>Empty</b><span>Leaves a gap</span></button>
               </div>
             </div>
