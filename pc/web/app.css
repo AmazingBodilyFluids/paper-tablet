@@ -92,7 +92,7 @@ h2 { font-size:15px; font-weight:500; color:var(--text); }
 .pane-title { font-family:var(--f-mono); font-size:10px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:var(--dim);
               margin-bottom:14px; display:flex; align-items:center; gap:10px; }
 .pane-title::after { content:""; flex:1; height:1px; background:var(--border); }
-.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.grid2 { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; }
 .grid3 { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
 .stack { display:flex; flex-direction:column; gap:16px; }
 .row { display:flex; align-items:center; gap:12px; }
@@ -310,3 +310,5 @@ ol.steps li .sub { color:var(--dim2); font-size:12px; margin-top:2px; }
   align-items:center; justify-content:center; font-weight:700; color:#000; }
 .pm-prof span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .pm-prof svg { position:absolute; top:50%; transform:translateY(-50%); }
+.opt .tx { min-width:0; }
+.t2.clip { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
