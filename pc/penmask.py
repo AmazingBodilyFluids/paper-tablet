@@ -1,0 +1,157 @@
+"""The pen mask: N x N cells over the tablet screen as it sits (view orientation), one byte each,
+0 = open .. 255 = the pen does nothing in Windows. Kept as a zlib file next to the settings; the
+contrast setting is applied over it, so the stored mask never changes when the contrast does."""
+import base64
+import math
+import os
+import struct
+import threading
+import zlib
+
+N = 720           # cells across and down: about 0.25 x 0.33 mm each on the Paper Pro
+FULL = 250        # from here up the pen leaves Windows altogether
+_OLD_N = 72
+
+
+def legacy(h):
+    """An old hex mask from the settings file (72 x 72, either 1 bit or one 0-f level per cell) as
+    N x N bytes, or None if there's nothing in it."""
+    h = "".join(c for c in str(h or "").lower() if c in "0123456789abcdef")
+    if not h.strip("0"):
+        return None
+    if len(h) == _OLD_N * _OLD_N // 4:
+        lv = [15 if (int(c, 16) >> (3 - k)) & 1 else 0 for c in h for k in range(4)]
+    else:
+        h = h[:_OLD_N * _OLD_N].ljust(_OLD_N * _OLD_N, "0")
+        lv = [int(c, 16) for c in h]
+    f = N // _OLD_N
+    out = bytearray(N * N)
+    for r in range(N):
+        src = lv[(r // f) * _OLD_N:(r // f + 1) * _OLD_N]
+        out[r * N:(r + 1) * N] = bytes(v * 17 for v in src for _ in range(f))
+    return out
+
+
+def contrast_table(k):
+    """Level -> level, pushed away from mid grey by k (below 1 towards it)."""
+    k = float(k or 1)
+    return bytes(max(0, min(255, math.floor(128 + (v - 127.5) * k))) for v in range(256))
+
+
+def png_la(levels, n=N):
+    """An n x n black image whose alpha is the level: what the tablet lays over the screen."""
+    raw = bytearray()
+    row = bytearray(2 * n)
+    for r in range(n):
+        row[1::2] = levels[r * n:(r + 1) * n]
+        raw += b"\0" + row
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 4, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
+
+
+class Mask:
+    def __init__(self, path=None, contrast=1.0):
+        self.path = path
+        self.lock = threading.Lock()
+        self.raw = bytearray(N * N)
+        self.ver = 0
+        if path and os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    data = zlib.decompress(f.read())
+                if len(data) == N * N:
+                    self.raw = bytearray(data)
+            except (OSError, zlib.error):
+                pass
+        self.set_contrast(contrast)
+
+    # ---- what the pen and the tablet use
+    def set_contrast(self, k):
+        with self.lock:
+            self.table = contrast_table(k)
+            self.eff = bytes(self.raw).translate(self.table)
+            self.cov = sum(self.eff) / (255 * N * N)
+            self.ver += 1
+
+    def level(self, p, q):
+        c, r = min(N - 1, max(0, int(p * N))), min(N - 1, max(0, int(q * N)))
+        return self.eff[r * N + c]
+
+    def png(self):
+        return png_la(self.eff)
+
+    def coverage(self):
+        """How much of the screen is masked, 0..1 (as used, after the contrast)."""
+        return self.cov
+
+    # ---- changes
+    def _changed(self):
+        self.eff = bytes(self.raw).translate(self.table)
+        self.cov = sum(self.eff) / (255 * N * N)
+        self.ver += 1
+        if self.path:
+            tmp = self.path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(zlib.compress(bytes(self.raw), 6))
+            os.replace(tmp, self.path)
+
+    def set_raw(self, data):
+        if len(data) != N * N:
+            raise ValueError(f"mask must be {N} x {N} bytes")
+        with self.lock:
+            self.raw = bytearray(data)
+            self._changed()
+
+    def set_b64(self, b64):
+        self.set_raw(base64.b64decode(b64))
+
+    def b64(self):
+        return base64.b64encode(bytes(self.raw)).decode("ascii")
+
+    def op(self, name):
+        with self.lock:
+            if name == "clear":
+                self.raw = bytearray(N * N)
+            elif name == "invert":
+                self.raw = bytearray(255 - v for v in self.raw)
+            else:
+                raise ValueError(name)
+            self._changed()
+
+    def shift(self, dp, dq):
+        """Move the whole mask by a fraction of the screen (what drags off the edge is lost)."""
+        dx, dy = round(dp * N), round(dq * N)
+        if not dx and not dy:
+            return
+        with self.lock:
+            out = bytearray(N * N)
+            for r in range(N):
+                sr = r - dy
+                if not 0 <= sr < N:
+                    continue
+                src = self.raw[sr * N:(sr + 1) * N]
+                if dx >= 0:
+                    out[r * N + dx:(r + 1) * N] = src[:N - dx]
+                else:
+                    out[r * N:(r + 1) * N + dx] = src[-dx:]
+            self.raw = out
+            self._changed()
+
+    def paint(self, value, rx, ry, pts):
+        """Round brush dabs at (p, q) fractions of the screen; rx / ry = radius as a fraction of the
+        screen width / height."""
+        rx, ry = max(1.0, rx * N), max(1.0, ry * N)
+        with self.lock:
+            for p, q in pts:
+                cx, cy = p * N, q * N
+                for r in range(max(0, int(cy - ry)), min(N, int(cy + ry) + 1)):
+                    t = (r + 0.5 - cy) / ry
+                    if abs(t) > 1:
+                        continue
+                    half = rx * math.sqrt(1 - t * t)
+                    c0, c1 = max(0, int(cx - half + 0.5)), min(N, int(cx + half + 0.5))
+                    if c1 > c0:
+                        self.raw[r * N + c0:r * N + c1] = bytes([value]) * (c1 - c0)
+            self._changed()

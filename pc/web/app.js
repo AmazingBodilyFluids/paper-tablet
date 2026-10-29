@@ -128,8 +128,7 @@ function render() {
   $("#traceName").title = tf;
   $("#maskConV").textContent = "×" + (S.cfg.mask_contrast || 1);
   $("#traceDel").disabled = !tf;
-  const mk = S.cfg.mask || "", shade = [...mk].reduce((n, c) => n + parseInt(c, 16), 0);
-  $("#maskInfo").textContent = shade ? `${Math.round(100 * shade / (mk.length * 15))}% of the screen is masked.` : "Nothing masked yet.";
+  $("#maskInfo").textContent = S.mask_pct ? `${S.mask_pct}% of the screen is masked.` : "Nothing masked yet.";
   $("#maskModeHint").textContent = S.cfg.mask_mode === "gate"
     ? "The darker the grey, the harder you press before ink starts. Black: no pen."
     : "Pressure is scaled by the shade: mid grey gives half, so half the opacity or size in a pressure brush. Black: no pen.";
@@ -445,25 +444,36 @@ function gestureText() {
 // ------------------------------------------------------------------ pen mask on the Screen area picture
 
 // Where the mask comes from: the image it was made from (kept while this window is open, so moving
-// and zooming it again stays sharp) or else the mask grid itself. s = zoom, ox / oy = offset as a
+// and zooming it again stays sharp) or else the stored mask itself. s = zoom, ox / oy = offset as a
 // fraction of the screen. The grid is rendered from it; the tablet gets it when a drag or zoom ends.
-const MASK_N = 72;
-let maskSrc = null;
+// Levels are 0 (open) .. 255 (pen ignored), MASK_N x MASK_N cells over the screen as it sits.
+let MASK_N = 720;
+let maskSrc = null, maskLoading = 0;
+function gridCanvas(lv) {
+  const c = document.createElement("canvas"); c.width = c.height = MASK_N;
+  const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N);
+  for (let i = 0; i < lv.length; i++) { const v = 255 - lv[i]; d.data[4 * i] = d.data[4 * i + 1] = d.data[4 * i + 2] = v; d.data[4 * i + 3] = 255; }
+  g.putImageData(d, 0, 0);
+  return c;
+}
+async function maskLoad(ver) {  // the stored mask from the PC, once per version
+  maskLoading = ver;
+  const m = await api().get_mask();
+  if (!m || m.ver !== S.mask_ver || (maskSrc && maskSrc.ver === m.ver)) return;  // stale, or ours already
+  MASK_N = m.n;
+  const bin = atob(m.b64), lv = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) lv[i] = bin.charCodeAt(i);
+  maskSrc = { el: gridCanvas(lv), grid: true, s: 1, ox: 0, oy: 0, ver: m.ver, lv };
+  maskOverlay = null;
+  drawTablet($("#mapPreview"));
+}
 function maskSource() {
-  const hex = (S.cfg.mask || "").padEnd(MASK_N * MASK_N, "0");
-  if (!maskSrc || maskSrc.hex !== hex) {
-    const c = document.createElement("canvas"); c.width = c.height = MASK_N;
-    const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N);
-    for (let i = 0; i < MASK_N * MASK_N; i++) {
-      const v = 255 - Math.round(parseInt(hex[i], 16) * 255 / 15);
-      d.data.set([v, v, v, 255], 4 * i);
-    }
-    g.putImageData(d, 0, 0);
-    maskSrc = { el: c, grid: true, s: 1, ox: 0, oy: 0, hex };
-  }
+  const committing = maskSrc && maskSrc.ver === null;
+  if (!committing && (!maskSrc || maskSrc.ver !== S.mask_ver) && maskLoading !== S.mask_ver && S.mask_ver !== undefined)
+    maskLoad(S.mask_ver);
   return maskSrc;
 }
-// The source drawn into a MASK_N x MASK_N grid over the screen (white outside it): levels 0..15.
+// The source drawn into the grid (white outside it): levels 0..255.
 function maskRender(src) {
   const N = MASK_N, [vw, vh] = S.view || [1, 1], c = document.createElement("canvas");
   c.width = c.height = N;
@@ -479,28 +489,34 @@ function maskRender(src) {
   g.drawImage(src.el, (N - dw) / 2 + src.ox * N, (N - dh) / 2 + src.oy * N, dw, dh);
   const px = g.getImageData(0, 0, N, N).data, out = new Uint8Array(N * N);
   for (let i = 0; i < N * N; i++)
-    out[i] = Math.round((1 - (0.2126 * px[4 * i] + 0.7152 * px[4 * i + 1] + 0.0722 * px[4 * i + 2]) / 255) * 15);
+    out[i] = Math.round(255 - (0.2126 * px[4 * i] + 0.7152 * px[4 * i + 1] + 0.0722 * px[4 * i + 2]));
   return out;
 }
+let maskOverlay = null;  // {key, canvas}: the shaded picture, redrawn only when something changes
 function drawMask(ctx, f) {
-  const src = maskSource(), lv = src.s === 1 && !src.ox && !src.oy && src.grid
-    ? Uint8Array.from(src.hex, ch => parseInt(ch, 16)) : maskRender(src);
-  const k = S.cfg.mask_contrast || 1;
-  for (let i = 0; i < lv.length; i++) lv[i] = Math.max(0, Math.min(15, Math.floor(8 + (lv[i] - 7.5) * k)));
-  if (!lv.some(v => v)) return;
-  const c = document.createElement("canvas"); c.width = c.height = MASK_N;
-  const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N), a = S.cfg.mask_on ? 0.7 : 0.3;
-  for (let i = 0; i < lv.length; i++) d.data.set([0, 0, 0, Math.round(255 * a * lv[i] / 15)], 4 * i);
-  g.putImageData(d, 0, 0);
-  ctx.save(); ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(c, f.x, f.y, f.w, f.h);
-  ctx.restore();
+  const src = maskSource();
+  if (!src) return;
+  const k = S.cfg.mask_contrast || 1, key = [src.ver, src.s, src.ox, src.oy, k, S.cfg.mask_on, src.el.width].join();
+  if (!maskOverlay || maskOverlay.key !== key) {
+    const lv = src.grid && src.s === 1 && !src.ox && !src.oy ? src.lv : maskRender(src);
+    const c = document.createElement("canvas"); c.width = c.height = MASK_N;
+    const g = c.getContext("2d"), d = g.createImageData(MASK_N, MASK_N), a = S.cfg.mask_on ? 0.7 : 0.3;
+    for (let i = 0; i < lv.length; i++)
+      d.data[4 * i + 3] = Math.round(a * Math.max(0, Math.min(255, Math.floor(128 + (lv[i] - 127.5) * k))));
+    g.putImageData(d, 0, 0);
+    maskOverlay = { key, canvas: c };
+  }
+  ctx.drawImage(maskOverlay.canvas, f.x, f.y, f.w, f.h);
 }
 async function maskCommit(src = maskSource()) {
-  const lv = maskRender(src), hex = Array.from(lv, v => v.toString(16)).join("");
-  src.hex = hex;  // the source (and its zoom / offset) stays: this grid came from it
-  await setKey("mask", hex);
-  if (!S.cfg.mask_on) await setKey("mask_on", true);
+  if (!src) return;
+  const lv = maskRender(src);
+  let bin = "";
+  for (let i = 0; i < lv.length; i += 0x8000) bin += String.fromCharCode.apply(null, lv.subarray(i, i + 0x8000));
+  const ver = await api().set_mask(btoa(bin));
+  src.ver = ver; S.mask_ver = ver; maskLoading = ver;  // the source (and its zoom / offset) stays
+  if (src.grid) { src.lv = lv; }
+  S.cfg.mask_on = true;
   refresh();
 }
 let dragWhat = "area";
@@ -524,7 +540,7 @@ for (const b of $$("#dragWhat button")) b.onclick = () => {
   };
   const box = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
   cv.addEventListener("mousedown", e => {
-    if (dragWhat === "mask") { const s = maskSource(); start = frac(e, false); m0 = [s.ox, s.oy]; }
+    if (dragWhat === "mask") { const s = maskSource(); if (!s) return; start = frac(e, false); m0 = [s.ox, s.oy]; }
     else start = frac(e);
   });
   window.addEventListener("mousemove", e => {
@@ -551,6 +567,7 @@ for (const b of $$("#dragWhat button")) b.onclick = () => {
     if (dragWhat !== "mask") return;
     e.preventDefault();
     const s = maskSource();
+    if (!s) return;
     s.s = Math.min(20, Math.max(0.05, s.s * Math.pow(1.1, -e.deltaY / 100)));
     drawTablet(cv);
     clearTimeout(wheelT);
@@ -1233,13 +1250,12 @@ async function resetTrace() {
 }
 
 async function maskOp(op) {
-  const n = 72 * 72, mk = (S.cfg.mask || "").padEnd(n, "0");
-  await setKey("mask", op === "clear" ? "0".repeat(n) : [...mk].map(c => (15 - parseInt(c, 16)).toString(16)).join(""));
+  await api().mask_op(op);
+  maskSrc = null;  // reloads from the PC
   refresh();
 }
 
-// An image as the pen mask: greyscale luminance, fitted to fill the tablet screen as it sits (cover),
-// one level 0 (white, open) .. f (black, masked) per cell.
+// An image as the pen mask: greyscale luminance, fitted to fill the tablet screen as it sits (cover).
 function maskFromImage(input) {
   const file = input.files && input.files[0];
   input.value = "";
@@ -1247,7 +1263,7 @@ function maskFromImage(input) {
   const img = new Image(), url = URL.createObjectURL(file);
   img.onload = async () => {
     URL.revokeObjectURL(url);
-    maskSrc = { el: img, grid: false, s: 1, ox: 0, oy: 0, hex: null };
+    maskSrc = { el: img, grid: false, s: 1, ox: 0, oy: 0, ver: null };
     await maskCommit(maskSrc);
     toast("Mask made from " + file.name + ". On the Screen area picture, drag it into place and zoom it with the wheel.");
     dragWhat = "mask";

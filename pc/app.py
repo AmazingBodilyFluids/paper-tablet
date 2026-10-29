@@ -30,6 +30,7 @@ MONITORS = rt.monitors()
 
 import webview  # noqa: E402
 
+import penmask  # noqa: E402
 from core import Engine, use_profile_config  # noqa: E402
 from version import __version__  # noqa: E402
 
@@ -132,6 +133,16 @@ class Api:
 
     def clear_ink(self):
         self._engine.companion.send("clear")
+
+    def get_mask(self):
+        """The pen mask as stored (before contrast): base64 of N x N bytes, and its version."""
+        return {"b64": self._engine.pmask.b64(), "ver": self._engine.pmask.ver, "n": penmask.N}
+
+    def set_mask(self, b64):
+        return self._engine.set_mask(b64)
+
+    def mask_op(self, name):
+        self._engine.mask_op(name)
 
     def set_position(self, key):
         self._engine.set_position(key)
