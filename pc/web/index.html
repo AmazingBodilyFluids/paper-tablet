@@ -146,7 +146,12 @@
     <section class="view" id="view-mapping">
       <h1>Screen area</h1>
       <p class="lead">Choose which display the pen draws on and how the tablet fits it. Drag a box on the picture to use only part of the tablet.</p>
-      <div class="grid2 mt2" style="grid-template-columns:1fr 1.5fr">
+      <div class="pane mt2">
+          <div class="pane-title">Tablet, as it sits on your desk</div>
+          <div class="preview-wrap drag" style="height:400px" id="mapWrap"><canvas id="mapPreview"></canvas></div>
+          <div class="legend mts"><span><i style="background:var(--accent2-b)"></i>reaches your display</span><span><i style="border:1.5px dashed var(--accent)"></i>active area: drag to change</span></div>
+        </div>
+      <div class="grid2 mt2">
         <div class="stack">
           <div class="pane">
             <div class="pane-title">Display</div>
@@ -161,6 +166,8 @@
             <div class="opt mts"><div class="tx"><div class="t1">Lift the pen at the edge</div><div class="t2">A stroke that runs off the area stops instead of drawing along the screen edge</div></div>
               <label class="switch"><input type="checkbox" data-key="edge_lift"><span class="track"></span></label></div>
           </div>
+        </div>
+        <div class="stack">
           <div class="pane">
             <div class="pane-title">Active area</div>
             <div class="row">
@@ -180,11 +187,6 @@
             <div class="opt"><div class="tx"><div class="t1">Paint it on the tablet</div><div class="t2">While on, the pen paints full shading, the eraser end clears it, and one finger drags the whole mask. Windows gets no pen meanwhile.</div></div>
               <div class="row"><button class="btn ghost" onclick="maskOp('invert')">Invert</button><button class="btn ghost" onclick="maskOp('clear')">Clear</button><label class="switch"><input type="checkbox" data-key="mask_edit"><span class="track"></span></label></div></div>
           </div>
-        </div>
-        <div class="pane">
-          <div class="pane-title">Tablet, as it sits on your desk</div>
-          <div class="preview-wrap drag" style="height:400px" id="mapWrap"><canvas id="mapPreview"></canvas></div>
-          <div class="legend mts"><span><i style="background:var(--accent2-b)"></i>reaches your display</span><span><i style="border:1.5px dashed var(--accent)"></i>active area: drag to change</span></div>
         </div>
       </div>
     </section>
