@@ -128,7 +128,8 @@ function render() {
   $("#traceDel").disabled = !tf;
   const mk = S.cfg.mask || "", cells = [...mk].reduce((n, c) => n + [0,1,1,2,1,2,2,3,1,2,2,3,2,3,3,4][parseInt(c, 16)], 0);
   $("#maskInfo").textContent = cells ? `${Math.round(100 * cells / (mk.length * 4))}% of the screen is masked.` : "Nothing masked yet.";
-  $("#trailV").textContent = S.cfg.trail_ms ? (S.cfg.trail_ms / 1000).toFixed(S.cfg.trail_ms % 1000 ? 2 : 0) + " s" : "keep";
+  if (document.activeElement !== $("#trailR")) { $("#trailR").value = trailToSlider(S.cfg.trail_ms); paintRange($("#trailR")); }
+  $("#trailV").textContent = trailText(S.cfg.trail_ms);
   $("#fitHint").textContent = {
     crop: "The whole display is reachable; a slice of the tablet goes unused if the shapes differ.",
     letterbox: "The whole tablet is used; parts of the display can't be reached if the shapes differ.",
@@ -1129,3 +1130,16 @@ async function maskOp(op) {
   await setKey("mask", op === "clear" ? "0".repeat(n) : [...mk].map(c => (15 - parseInt(c, 16)).toString(16)).join(""));
   refresh();
 }
+
+// Trail: 0.25-5 s, and one step past 5 s is "until cleared" (stored as 0, which the tablet keeps forever)
+const TRAIL_MAX = 5250;
+const trailToSlider = ms => ms ? Math.min(5000, ms) : TRAIL_MAX;
+const trailText = ms => ms ? (ms / 1000).toFixed(ms % 1000 ? 2 : 0) + " s" : "Until cleared";
+$("#trailR").addEventListener("input", e => {
+  const v = +e.target.value, ms = v >= TRAIL_MAX ? 0 : v;
+  paintRange(e.target);
+  $("#trailV").textContent = trailText(ms);
+  S.cfg.trail_ms = ms;
+  clearTimeout(e.target._t);
+  e.target._t = setTimeout(() => api().set("trail_ms", ms), 120);
+});
