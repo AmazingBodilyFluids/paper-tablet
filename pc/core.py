@@ -127,8 +127,10 @@ def clean_profiles(profiles, current=None):
         p = p if isinstance(p, dict) else {}
         name = " ".join(str(p.get("name") or "").split())[:24] or f"Profile {i + 1}"
         touch = p.get("touch") if p.get("touch") in TOUCH_MODES else "shortcuts"
-        out.append({"name": name, "buttons": clean_buttons(p.get("buttons")), "touch": touch})
-    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS), "touch": "shortcuts"}]
+        # programs (exe names without .exe, comma separated) that switch to this profile by themselves
+        apps = ", ".join(a.strip().lower() for a in str(p.get("apps") or "").split(",") if a.strip())[:200]
+        out.append({"name": name, "buttons": clean_buttons(p.get("buttons")), "touch": touch, "apps": apps})
+    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS), "touch": "shortcuts", "apps": ""}]
 
 
 def load_profiles(cfg):
@@ -598,6 +600,10 @@ class Engine:
         self.last_action = None
         self.touch = None       # the latest finger report from the tablet, for the live view
         self.touch_out = None   # WindowsTouch, made when a profile first uses Windows touch
+        self.fg_app = ""        # program in front on this PC, polled while connected (profile auto-switch)
+        self.auto_app = None    # the program the last automatic profile choice was made for
+        self.battery = None     # {"pct", "status"} from the tablet, polled once a minute
+        self.battery_at = 0
         self.load_masks()
         self.rate = RateMeter()
         self.mapper = None
@@ -634,10 +640,10 @@ class Engine:
                    "worst": max(res) if res else None}
         calibrating = None
         if self.cal is not None:
-            i = len(self.cal["taps"])
+            i = self.cal_index(self.cal)
             calibrating = {"mode": self.cal["mode"], "index": i, "total": len(self.cal_targets(self.cal["mode"])),
-                           "number": self.cal_number(self.cal["mode"], i), "prompt": self.cal_prompt(self.cal["mode"], i),
-                           "targets": self.cal_targets(self.cal["mode"])}
+                           "number": self.cal_number(self.cal["mode"], i), "prompt": self.cal_prompt(self.cal),
+                           "targets": self.cal_targets(self.cal["mode"]), "redo": self.cal.get("redo")}
         return {
             "cfg": self.cfg, "touch_mode": self.touch_mode(), "status": {"kind": self.status[0], "text": self.status[1]},
             "link": self.link, "ssh": self.ssh_port, "connected": self.connected, "via": self.via,
@@ -647,6 +653,7 @@ class Engine:
             "model": {"key": self.model.key, "name": self.model.name, "verified": self.model.verified,
                       "frontlight": self.model.frontlight, "developer_mode": self.model.developer_mode},
             "monitors": mon, "calibration": cal, "calibrating": calibrating, "cal_result": self.cal_result,
+            "fg_app": self.fg_app, "battery": self.battery,
             "cal_modes": {k: v["label"] for k, v in CAL_MODES.items()},
             "rotations": list(ROTATIONS), "aspect": self.mapper.oriented_aspect(),
             "used": self.mapper.used_region(), "pressure_max": self.mapper.absinfo["PRESSURE"]["max"],
@@ -1262,7 +1269,62 @@ class Engine:
             if (ssh and self.cfg["onboarded"] and self.cfg["auto_connect"] and not self.manual_off
                     and time.time() >= self.retry_at and not (self.worker and self.worker.is_alive())):
                 self.connect()
+            if self.connected:
+                self.auto_profile(shapes.foreground_app())
+                if time.time() - self.battery_at > 60:
+                    self.battery_at = time.time()
+                    threading.Thread(target=self.read_battery, daemon=True).start()
             self._stop.wait(1.0)
+
+    # ------------------------------------------------------------------ profile by program, battery
+
+    def profile_for(self, app):
+        """Index of the first profile that lists `app` (exe name) under "Use this profile in", or None."""
+        for i, p in enumerate(self.cfg.get("panel_profiles") or []):
+            if shapes.app_allowed(app, str(p.get("apps") or "").split(",")):
+                return i
+        return None
+
+    def auto_profile(self, app):
+        """The program in front changed: switch to the profile that lists it. A profile picked by hand
+        (the arrows on the tablet, the desktop list) stays until the program in front changes again,
+        and a program no profile lists keeps whatever profile is up."""
+        app = (app or "").lower()
+        if app != self.fg_app:
+            self.fg_app = app
+            self.changed()
+        if not app or app == self.auto_app:
+            return
+        self.auto_app = app
+        i = self.profile_for(app)
+        if i is not None and i != self.cfg.get("panel_profile"):
+            self.set("panel_profile", i)
+
+    BATTERY = ('for d in /sys/class/power_supply/*; do [ -f "$d/capacity" ] && '
+               'echo "$(cat "$d/capacity") $(cat "$d/status" 2>/dev/null)"; done; true')
+
+    @staticmethod
+    def parse_battery(out):
+        """"82 Charging" -> {"pct": 82, "status": "charging"}, or None when the tablet reports nothing."""
+        for line in (out.decode(errors="replace") if isinstance(out, bytes) else str(out)).splitlines():
+            parts = line.split()
+            if parts and parts[0].isdigit():
+                status = " ".join(parts[1:]).lower() or "unknown"
+                return {"pct": max(0, min(100, int(parts[0]))), "status": status}
+        return None
+
+    def read_battery(self):
+        tab = self.worker.tab if self.worker else None
+        if not tab:
+            return
+        try:
+            got = self.parse_battery(tab.run(self.BATTERY)[1])
+        except Exception as ex:
+            print("battery:", ex, flush=True)
+            return
+        if got != self.battery:
+            self.battery = got
+            self.changed()
 
     def open_tablet(self):
         import paramiko
@@ -1418,6 +1480,8 @@ class Engine:
                 "Wi-Fi is off here. The tablet still takes Wi-Fi logins until it's next plugged in, when the app switches that off."}
 
     def on_disconnected(self, worker):
+        self.battery = None
+        self.auto_app = None
         self.companion.chan = None
         self.mouse.end()
         self.keys.release_all()  # never leave Ctrl/Alt/Shift/Space (or a pan drag) held down
@@ -1543,7 +1607,7 @@ class Engine:
                + (", shapes on" if self.cfg.get("snap") else ""))
         if self.cal is not None:
             c.send("mode targets")
-            c.send(f"next {self.cal_number(self.cal['mode'], len(self.cal['taps']))}")
+            c.send(f"next {self.cal_number(self.cal['mode'], self.cal_index(self.cal))}")
         else:
             c.send("mode ink")
 
@@ -1560,13 +1624,40 @@ class Engine:
         nums = CAL_MODES[mode]["numbers"]
         return nums[i] if nums and i < len(nums) else 0
 
-    def cal_prompt(self, mode, i):
+    @staticmethod
+    def cal_index(cal):
+        """Which target is wanted now: the one being tapped again, or the next untapped one."""
+        return cal["redo"] if cal.get("redo") is not None else len(cal["taps"])
+
+    def cal_prompt(self, cal):
+        mode, i, again = cal["mode"], self.cal_index(cal), " again" if cal.get("redo") is not None else ""
         nums = CAL_MODES[mode]["numbers"]
         if nums:
             if i >= len(nums):
                 return "Done"
-            return f"Tap the centre of crosshair {nums[i]} ({TARGET_NAMES[nums[i] - 1]})"
-        return f"Tap the {CORNER_NAMES[min(i, 3)]} corner of the screen"
+            return f"Tap the centre of crosshair {nums[i]} ({TARGET_NAMES[nums[i] - 1]}){again}"
+        return f"Tap the {CORNER_NAMES[min(i, 3)]} corner of the screen{again}"
+
+    @staticmethod
+    def cal_mode_of(calibration):
+        """The target set a saved calibration was made with (older ones don't record it)."""
+        t = calibration.get("targets") or []
+        if calibration.get("mode") in CAL_MODES:
+            return calibration["mode"]
+        return "sheet9" if len(t) == 9 else "sheet4" if calibration.get("inset") else "corners"
+
+    def retap_target(self, i):
+        """Calibrate again for one target only (i: its position in the saved calibration). The other
+        taps stay as they were and the fit is recomputed, so one mis-tap doesn't cost a full run."""
+        c = self.calibration or {}
+        taps, targets = c.get("taps") or [], c.get("targets") or []
+        if not self.connected or not taps or len(taps) != len(targets) or not 0 <= int(i) < len(taps):
+            return False
+        self.cal = {"mode": self.cal_mode_of(c), "taps": [list(t) for t in taps], "redo": int(i)}
+        self.cal_result = None
+        self.sync_companion()
+        self.changed()
+        return True
 
     def start_calibration(self, mode):
         if mode not in CAL_MODES or not self.connected:
@@ -1585,12 +1676,15 @@ class Engine:
         cal = self.cal
         if cal is None:
             return
-        cal["taps"].append(raw)
         targets = self.cal_targets(cal["mode"])
-        if len(cal["taps"]) < len(targets):
-            self.companion.send(f"next {self.cal_number(cal['mode'], len(cal['taps']))}")
-            self.changed()
-            return
+        if cal.get("redo") is not None:
+            cal["taps"][cal["redo"]] = raw
+        else:
+            cal["taps"].append(raw)
+            if len(cal["taps"]) < len(targets):
+                self.companion.send(f"next {self.cal_number(cal['mode'], len(cal['taps']))}")
+                self.changed()
+                return
         self.cal = None
         try:
             result = rt.grid_calibration(self.pen["abs"], cal["taps"][:len(targets)], targets)
@@ -1601,14 +1695,16 @@ class Engine:
             return
         result["device"] = self.pen["name"]
         result["date"] = time.strftime("%Y-%m-%d %H:%M")
+        result["mode"] = cal["mode"]
         self.calibration = result
         self.cfg["orientation"] = "as-calibrated"  # the taps already capture how the tablet sits
         res = result.get("residual_mm") or []
         worst = max(range(len(res)), key=lambda k: res[k]) if res else None
-        text = "Calibrated."
-        if worst is not None and res[worst] > 2.0:
-            text += f" Point {worst + 1} was {res[worst]:.1f} mm off; probably a mis-tap, consider redoing it."
+        text = f"Target {cal['redo'] + 1} tapped again. Calibrated." if cal.get("redo") is not None else "Calibrated."
         self.cal_result = {"ok": True, "text": text}
+        if worst is not None and res[worst] > 2.0:
+            self.cal_result["text"] += f" Point {worst + 1} was {res[worst]:.1f} mm off, probably a mis-tap."
+            self.cal_result["retap"] = worst  # the page offers to tap just that one again
         self.save()
         self.refresh_mapper()
         self.sync_companion()

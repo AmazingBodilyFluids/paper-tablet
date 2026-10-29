@@ -530,3 +530,88 @@ class WiFi(unittest.TestCase):
         e = self.engine(via="wifi", connected=False, wifi=True, wifi_host="192.168.0.100")
         with self.assertRaises(PermissionError):
             e.open_tablet()
+
+
+class ProfileByProgram(Profiles):
+    """The profile follows the program in front, until a profile is picked by hand."""
+
+    def test_apps_are_cleaned(self):
+        p = core.clean_profiles([{"name": "PS", "apps": " Photoshop ,krita,, X" * 40}])
+        self.assertTrue(p[0]["apps"].startswith("photoshop, krita, x"))
+        self.assertLessEqual(len(p[0]["apps"]), 200)
+        self.assertEqual(core.clean_profiles([{}])[0]["apps"], "")
+
+    def test_switches_when_the_program_changes(self):
+        e = self.engine({"panel_profiles": [{"name": "PS", "apps": "photoshop"}, {"name": "Krita", "apps": "krita, kritarunner"}]})
+        e.fg_app, e.auto_app = "", None
+        e.auto_profile("krita")
+        self.assertEqual(e.cfg["panel_profile"], 1)
+        e.auto_profile("explorer")          # no profile lists it: nothing changes
+        self.assertEqual(e.cfg["panel_profile"], 1)
+        e.auto_profile("photoshop")
+        self.assertEqual(e.cfg["panel_profile"], 0)
+        e.tablet_action("profile next")      # picked by hand: stays while Photoshop is in front
+        self.assertEqual(e.cfg["panel_profile"], 1)
+        e.auto_profile("photoshop")
+        self.assertEqual(e.cfg["panel_profile"], 1)
+        e.auto_profile("krita")              # the program changed: automatic again
+        e.auto_profile("photoshop")
+        self.assertEqual(e.cfg["panel_profile"], 0)
+        self.assertEqual(e.fg_app, "photoshop")
+        e.auto_profile("")                   # unknown window: remembered as nothing, no switch
+        self.assertEqual(e.cfg["panel_profile"], 0)
+
+
+class Battery(unittest.TestCase):
+    def test_parse(self):
+        self.assertEqual(core.Engine.parse_battery(b"82 Charging\n"), {"pct": 82, "status": "charging"})
+        self.assertEqual(core.Engine.parse_battery(b"\n100 Full\n"), {"pct": 100, "status": "full"})
+        self.assertEqual(core.Engine.parse_battery(b"7\n"), {"pct": 7, "status": "unknown"})
+        self.assertEqual(core.Engine.parse_battery(b"cat: no such file\n"), None)
+        self.assertEqual(core.Engine.parse_battery(b""), None)
+
+
+class RetapOneTarget(Profiles):
+    ABS = {"X": {"min": 0, "max": 11180, "res": 0}, "Y": {"min": 0, "max": 15340, "res": 0},
+           "PRESSURE": {"min": 0, "max": 4096, "res": 0}}
+
+    def calibrated(self):
+        import math
+        e = self.engine()
+        e.pen = {"name": "pen", "abs": self.ABS}
+        e.worker = types.SimpleNamespace(connected=True)
+        targets = rt.grid_targets(9, 0.1)
+        raw = lambda u, v: (v * 11180, (1 - u) * 15340)
+        taps = [raw(u, v) for u, v in targets]
+        taps[4] = (taps[4][0] + 900, taps[4][1])  # a mis-tap on the middle target
+        e.cal = {"mode": "sheet9", "taps": taps[:-1]}
+        e.on_tap(taps[-1])
+        return e, raw, targets
+
+    def test_bad_tap_is_offered_for_a_retap(self):
+        e, raw, targets = self.calibrated()
+        self.assertTrue(e.cal_result["ok"])
+        self.assertEqual(e.cal_result.get("retap"), 4)
+        self.assertEqual(e.calibration["mode"], "sheet9")
+        self.assertGreater(e.calibration["residual_mm"][4], 2.0)
+
+    def test_retap_replaces_one_tap_and_refits(self):
+        e, raw, targets = self.calibrated()
+        self.assertTrue(e.retap_target(4))
+        self.assertEqual(e.cal["redo"], 4)
+        self.assertEqual(core.Engine.cal_index(e.cal), 4)
+        self.assertIn("again", e.cal_prompt(e.cal))
+        e.on_tap(raw(*targets[4]))
+        self.assertIsNone(e.cal)
+        self.assertNotIn("retap", e.cal_result)
+        self.assertIn("Target 5 tapped again", e.cal_result["text"])
+        self.assertLess(max(e.calibration["residual_mm"]), 0.5)
+        self.assertEqual(len(e.calibration["taps"]), 9)
+
+    def test_retap_needs_a_tablet_and_a_valid_target(self):
+        e, _, _ = self.calibrated()
+        self.assertFalse(e.retap_target(9))
+        e.worker = None
+        self.assertFalse(e.retap_target(0))
+        self.assertEqual(core.Engine.cal_mode_of({"targets": [[0, 0]] * 4, "inset": 0.0}), "corners")
+        self.assertEqual(core.Engine.cal_mode_of({"targets": [[0, 0]] * 4, "inset": 0.1}), "sheet4")

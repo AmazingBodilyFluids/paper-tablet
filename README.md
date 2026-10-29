@@ -22,16 +22,18 @@ handle undo, redo, pan and zoom.
 - **Plug and play.** Plug in and the pen and the tablet screen start. Unplug and the tablet goes back to your
   notebooks within seconds. Nothing is installed permanently on the tablet.
 - **Calibration** with 9, 4 or 0 targets. It learns exactly where the pen lands and which way round the
-  tablet sits on your desk.
+  tablet sits on your desk. A mis-tap is pointed out afterwards, and one click lets you tap just that target again.
 - **Screen area.** Pick a display, choose fill / whole tablet / stretch, and drag out the part of the tablet
   you want to use. A stroke that runs off that part lifts, instead of drawing along the screen edge.
-- **Pen feel.** A pressure curve, a light-touch threshold, a full-range check, and tilt on or off.
+- **Pen feel.** Soft / Linear / Firm presets and a pressure curve, a light-touch threshold, a full-range check,
+  tilt on or off, and a scribble pad that draws with the pressure your apps receive, so a change is felt at once.
 - **Hold to snap.** Draw a line, circle, ellipse, triangle, rectangle or polygon, then hold the pen still and
   it becomes a clean shape, as in the tablet's own notebooks.
 - **Shortcut panel on the tablet.** 16 buttons you design yourself in the desktop app: any title and any key
   combination. A button can tap its keys or hold them (for Space-to-pan, Alt-to-pick and the like).
   The panel folds away from its corner tab when you want the whole surface. Keep as many named button sets
-  (profiles) as you like, for example one per app, and switch with the arrows at the top of the panel.
+  (profiles) as you like, for example one per app, and switch with the arrows at the top of the panel, or let a
+  profile switch in by itself when the program it lists comes to the front.
 - **Paper and tracing on the tablet screen.** Lined, squared, dot, cross, blueprint or isometric paper under
   your strokes, and a tracing image you can move and zoom with your fingers. The front light can go to full
   while you trace, and comes back to your level afterwards.
