@@ -597,7 +597,7 @@ Window {
             if (gMode === "five") {
                 var c5 = centroid(l), dy5 = c5.y - gC0.y
                 if (dy5 > 180 && Math.abs(c5.x - gC0.x) < dy5 * 0.6 && Math.abs(a) < 8) {
-                    gMode = "dead"; gTapOk = false; fullRefresh(); say("Screen refreshed"); return
+                    gMode = "dead"; gTapOk = false; clearInk(); fullRefresh(); say("Ink cleared"); return
                 }
                 if (Math.abs(a) < 8) return
                 gMode = "rotate"; gTapOk = false; act("rotate begin")
