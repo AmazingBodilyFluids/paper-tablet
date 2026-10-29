@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Paper Tablet</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Paper Tablet turns a reMarkable Paper Pro into a pressure-sensitive Windows Ink pen tablet over the USB cable. Free and open source (MIT).">
+<meta property="og:title" content="Paper Tablet">
+<meta property="og:description" content="Use your reMarkable Paper Pro as a pen tablet for your PC: pressure, tilt, hover, eraser, a shortcut panel and finger gestures.">
+<meta property="og:image" content="screenshots/home.png">
+<link rel="stylesheet" href="site/site.css">
+</head>
+<body>
+<script>document.documentElement.classList.add("js");</script>
+
+<!-- To change the release on this page, edit the version and file names in the Download section
+     and add an entry at the top of the Version history. -->
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Paper Tablet, back to top">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
+        <rect x="2.5" y="5" width="19" height="14" rx="2.2"/><path d="M6.5 14.5c2.2-3.6 3.6-3.6 4.8-1.2s2.6 2.4 5.2-2.6"/>
+      </svg>
+      <span>PAPER TABLET</span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#demos">See it work</a>
+      <a href="#features">Features</a>
+      <a href="#download">Download</a>
+      <a href="#setup">Setup</a>
+      <a href="#history">Version history</a>
+    </nav>
+    <div class="skins" role="group" aria-label="Colour theme">
+      <button class="skin" data-skin="navy" title="Paper Tablet" aria-label="Paper Tablet theme" style="--sw-a:#0D1B2A;--sw-b:#C4A882"></button>
+      <button class="skin" data-skin="intaglio" title="Intaglio" aria-label="Intaglio theme" style="--sw-a:#1a2e25;--sw-b:#cfb57a"></button>
+      <button class="skin" data-skin="graphite" title="Graphite" aria-label="Graphite theme" style="--sw-a:#1b1f24;--sw-b:#7fb3d5"></button>
+      <button class="skin" data-skin="ledger" title="Ledger (light)" aria-label="Ledger light theme" style="--sw-a:#f4f1e8;--sw-b:#1f5c45"></button>
+    </div>
+    <a class="gh" href="https://github.com/AmazingBodilyFluids/paper-tablet">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span>GitHub</span>
+    </a>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ================================================================== hero -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <span class="status-pill"><span class="dot"></span>v0.9.1 · free and open source</span>
+      <h1>Your reMarkable is now a <em>pen tablet</em> for your PC.</h1>
+      <p class="lede">Plug a reMarkable Paper Pro into your PC with its USB cable and draw in Photoshop, Krita, Clip Studio
+        or any Windows Ink app. Pressure, tilt, hover and the eraser end all arrive as a real Windows pen,
+        and the tablet's own screen shows your strokes as you draw.</p>
+      <div class="ctas">
+        <a class="btn primary" href="#download">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 16h12"/></svg>
+          Download for Windows <small>0.9.1</small>
+        </a>
+        <a class="btn" href="#demos">See it work</a>
+      </div>
+      <p class="fine">Windows 10 (1809+) or 11. No driver, no admin rights. Linux preview on the <code>linux</code> branch.
+        reMarkable 2 and 1 in beta.</p>
+    </div>
+    <div class="stage" aria-label="Animation: the pen draws on the reMarkable, and the same stroke appears on the PC with its pressure">
+      <canvas id="hero" data-demo="hero"></canvas>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><b>4096</b><span>pressure levels</span><i>full range reached on the device</i></div>
+      <div class="stat"><b>~500 Hz</b><span>pen reports while drawing</span><i>measured on a Paper Pro</i></div>
+      <div class="stat"><b>±60°</b><span>tilt, both axes</span><i>measured, hover and contact</i></div>
+      <div class="stat"><b>0</b><span>drivers to install</span><i>uses Windows Ink directly</i></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================= demos -->
+<section id="demos">
+  <div class="wrap">
+    <div class="sec-head rise">
+      <span class="eyebrow">See it work</span>
+      <h2>Everything the pen does, shown as it happens.</h2>
+      <p>These are live animations of the real behaviour, drawn in your browser. Screen recordings from the tablet
+        will replace them.</p>
+    </div>
+
+    <div class="demo-tabs" role="tablist" aria-label="Demos">
+      <button class="demo-tab" role="tab" aria-selected="true" data-tab="pressure">Pressure</button>
+      <button class="demo-tab" role="tab" aria-selected="false" data-tab="tilt">Tilt</button>
+      <button class="demo-tab" role="tab" aria-selected="false" data-tab="snap">Hold to snap</button>
+      <button class="demo-tab" role="tab" aria-selected="false" data-tab="panel">Shortcut panel</button>
+      <button class="demo-tab" role="tab" aria-selected="false" data-tab="gestures">Finger gestures</button>
+      <button class="demo-tab" role="tab" aria-selected="false" data-tab="mask">Pen mask <span class="tag">next</span></button>
+    </div>
+
+    <!-- Each demo can show real footage instead of its animation: put the file in site/media/ and set
+         data-video="site/media/pressure.mp4" (and optionally data-poster) on that demo's tab button above. -->
+    <div class="player rise" role="tabpanel">
+      <div class="screen" id="screen">
+        <canvas id="demo" data-demo="pressure"></canvas>
+        <span class="rec">Animated demo</span>
+        <div class="scrub"><i id="scrub"></i></div>
+      </div>
+      <div class="caption" id="caption">
+        <!-- filled from the templates below -->
+      </div>
+    </div>
+
+    <template id="cap-pressure">
+      <span class="badge out">In 0.9.0 and later</span>
+      <h3>4096 levels of pressure</h3>
+      <p>Press harder and the line gets heavier, exactly as with a Wacom pen. The app passes every pen report on,
+        with no frame-rate cap.</p>
+      <ul>
+        <li>Your own pressure curve and a light-touch threshold on the <b>Pen feel</b> page</li>
+        <li>A full-range check, so you can see you reach 100%</li>
+        <li>Photoshop: turn on <b>Pen Pressure</b> for size or opacity</li>
+      </ul>
+      <p class="foot">Pressure was confirmed in Photoshop on a Paper Pro with the Marker Plus.</p>
+    </template>
+    <template id="cap-tilt">
+      <span class="badge out">In 0.9.0 and later</span>
+      <h3>Tilt and hover</h3>
+      <p>Lean the pen and brushes that follow tilt change their angle. The cursor follows the pen in the air
+        before it touches, so you see where you will land.</p>
+      <ul>
+        <li>About ±60° on both axes, measured in hover and in contact</li>
+        <li>Turn the eraser end round and Windows sees an eraser</li>
+        <li>Tilt can be switched off on <b>Pen feel</b></li>
+      </ul>
+      <p class="foot">Photoshop needs a brush with Pen Tilt set as its angle control.</p>
+    </template>
+    <template id="cap-snap">
+      <span class="badge out">In 0.9.0 and later</span>
+      <h3>Hold to snap</h3>
+      <p>Draw a line, circle, ellipse, triangle, rectangle or polygon, then hold the pen still for 0.6&nbsp;s. It becomes
+        a clean shape drawn with your stroke's own pressure, as in the tablet's notebooks.</p>
+      <ul>
+        <li>The app lifts the pen, presses Ctrl+Z on your stroke, and draws the clean one</li>
+        <li>Works in the drawing programs listed on <b>Pen feel</b></li>
+        <li>Switch it on or off from a panel button</li>
+      </ul>
+      <p class="foot">It relies on Ctrl+Z removing exactly one stroke, which is why it is limited to known apps.</p>
+    </template>
+    <template id="cap-panel">
+      <span class="badge out">In 0.9.0 and later</span>
+      <h3>Shortcuts under your other hand</h3>
+      <p>A panel of 16 buttons on the tablet's edge, about 34 mm wide. You design each one in the desktop app: any title,
+        any key combination.</p>
+      <ul>
+        <li><b>Shortcut</b> taps its keys; <b>Hold key</b> holds them while your finger stays (Space to pan, Alt to pick)</li>
+        <li>Pen on/off, Shapes on/off and Clear ink buttons</li>
+        <li>Fold it away from its corner tab to use the whole surface</li>
+        <li><span class="badge next">Next release</span> Named profiles, one per app, switched with arrows on the panel</li>
+      </ul>
+      <p class="foot">The defaults follow Photoshop: Undo, Redo, brush size, Brush, Eraser, Hand, Pick, Ctrl, Shift, Zoom, Fit, Shapes, Pen, Save.</p>
+    </template>
+    <template id="cap-gestures">
+      <span class="badge out">In 0.9.0 and later</span>
+      <h3>Undo with three fingers</h3>
+      <p>Swipe three fingers left to undo and right to redo, one step for each stretch of the swipe, live as you go.
+        Two fingers pan and pinch to zoom.</p>
+      <ul>
+        <li>Fingers are ignored while the pen is near the screen</li>
+        <li><span class="badge next">Next release</span> Five-finger twist rotates the canvas; five-finger double tap resets it</li>
+        <li><span class="badge next">Next release</span> Palm-sized contacts are ignored, so a resting hand does nothing</li>
+      </ul>
+      <p class="foot">Short, Medium or Long swipe steps. Tap gestures can be given any keys.</p>
+    </template>
+    <template id="cap-mask">
+      <span class="badge next">Next release</span>
+      <h3>A stencil for the pen</h3>
+      <p>Load any image as a greyscale mask. Black ignores the pen, white leaves it alone, and grey fades the pressure
+        (mid grey gives half) or asks for a firmer press.</p>
+      <ul>
+        <li>Place and zoom it on the Screen area picture, with contrast and Invert on top</li>
+        <li>720 × 720 with 256 shades, shown on the tablet as a smooth image</li>
+        <li>Keep a library of named masks and switch them from a corner tab on the tablet</li>
+      </ul>
+      <p class="foot">Built on the main branch and in hardware testing now; it ships in the next release.</p>
+    </template>
+  </div>
+</section>
+
+<!-- ============================================================== features -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head rise">
+      <span class="eyebrow">Features</span>
+      <h2>A drawing tablet, a shortcut pad and a light box in one.</h2>
+      <p>Every feature here has been used on a real Paper Pro unless it says beta. Each card says where you can get it.</p>
+    </div>
+    <div class="legend">
+      <span><span class="badge out">0.9.x</span> in the current download</span>
+      <span><span class="badge next">Next</span> built and in testing, ships in the next release</span>
+      <span><span class="badge beta">Beta</span> not yet tested on real hardware</span>
+    </div>
+
+    <div class="feat-groups">
+      <div class="feat-group rise">
+        <h3>The pen</h3>
+        <div class="feats">
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 3.5l3 3L7 16H4v-3z"/><path d="M11.5 5.5l3 3"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>A real Windows pen</h4><p>Windows Ink pen input, so apps see a pen, not a mouse. Pressure, tilt, hover and the eraser end, with no driver.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="6"/><path d="M10 1.5v4M10 14.5v4M1.5 10h4M14.5 10h4"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Calibration</h4><p>9, 4 or 0 targets. It learns where the pen lands and which way round the tablet sits on your desk.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="4" width="15" height="10" rx="1"/><rect x="6" y="6.5" width="8" height="5" stroke-dasharray="2 1.5"/><path d="M7 17h6" stroke-linecap="round"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Screen area</h4><p>Pick a display, choose fill, whole tablet or stretch, and drag out the part of the tablet you use. <span class="badge next">Next</span> A stroke that runs off that part lifts instead of dragging along the edge.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 17C8 17 9 3 17 3"/><circle cx="10" cy="10" r="1.6" fill="currentColor"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Pen feel</h4><p>A pressure curve, a light-touch threshold, a full-range check, and tilt on or off.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M10 3l7 12H3z"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Hold to snap</h4><p>Lines, circles, ellipses, triangles, rectangles and polygons become clean shapes when you hold the pen still.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="14" height="14" rx="1"/><circle cx="10" cy="10" r="4" fill="currentColor" fill-opacity=".35"/></svg></span><span class="badge next">Next</span></header>
+            <h4>Pen mask</h4><p>A greyscale stencil from any image: black ignores the pen, grey fades it. A library of named masks, Invert, and a corner tab on the tablet.</p></article>
+        </div>
+      </div>
+
+      <div class="feat-group rise">
+        <h3>The tablet</h3>
+        <div class="feats">
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M7 2v4M13 2v4M5 6h10v3a5 5 0 01-10 0zM10 14v4"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Plug and play</h4><p>Plug in and the pen and tablet screen start. Unplug and the tablet is back in your notebooks within seconds. Nothing stays installed on it.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="6" height="4" rx=".8"/><rect x="11" y="3" width="6" height="4" rx=".8"/><rect x="3" y="9" width="6" height="4" rx=".8"/><rect x="11" y="9" width="6" height="4" rx=".8"/><rect x="3" y="15" width="6" height="2.5" rx=".8"/><rect x="11" y="15" width="6" height="2.5" rx=".8"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Shortcut panel</h4><p>16 buttons you design, tapping or holding any keys. <span class="badge next">Next</span> Named profiles, switched with arrows on the panel.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 13c3-6 5-6 7-2s4 4 7-3" /><path d="M3 17h14" stroke-opacity=".4"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Ink on the tablet screen</h4><p>Your strokes show on the e-paper as a fading trail, so you draw on the tablet, not blind. <span class="badge next">Next</span> Or keep them until you clear.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="3" y="3" width="14" height="14" rx="1"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14" stroke-opacity=".6"/></svg></span><span class="badge next">Next</span></header>
+            <h4>Paper and tracing</h4><p>Lined, squared, dot, cross, blueprint or isometric paper, and a tracing image you move and zoom with your fingers.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6L16 16M4 16l1.4-1.4M14.6 5.4L16 4"/></svg></span><span class="badge next">Next</span></header>
+            <h4>Light pad</h4><p>On the Paper Pro, the front light goes to full while you trace and returns to your own level afterwards.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 10V5a1.5 1.5 0 013 0v4M9 9V3.5a1.5 1.5 0 013 0V9M12 9V5a1.5 1.5 0 013 0v6a6 6 0 01-6 6h-.5A5.5 5.5 0 013 11.5L4.5 9"/></svg></span><span class="badge next">Next</span></header>
+            <h4>Palm rejection</h4><p>Fingers are ignored while the pen is near, and palm-sized contacts are ignored always. A touch stuck for 3 s is cleared.</p></article>
+        </div>
+      </div>
+
+      <div class="feat-group rise">
+        <h3>The app and beyond</h3>
+        <div class="feats">
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="3.5" width="15" height="11" rx="1.2"/><path d="M2.5 6.5h15"/><circle cx="14" cy="17" r="1.3" fill="currentColor"/></svg></span><span class="badge out">0.9.1</span></header>
+            <h4>Tray icon and themes</h4><p>Close to the tray and the pen keeps working. A resizable window in four themes: Paper Tablet, Graphite, Ledger and Intaglio.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v9m-3.5-3.5L10 12l3.5-3.5M4 15v2h12v-2"/></svg></span><span class="badge out">0.9.0</span></header>
+            <h4>Installer or portable</h4><p>A per-user installer with no admin rights, or a zip that runs from anywhere and keeps its settings beside it.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 8a11 11 0 0115 0M5 11a7 7 0 0110 0M7.5 14a3.5 3.5 0 015 0"/><circle cx="10" cy="16.5" r=".9" fill="currentColor"/></svg></span><span class="badge beta">Beta</span></header>
+            <h4>Wi-Fi</h4><p>Pair once over the cable, then use the tablet over your network with the cable out. It only logs in to the tablet whose key it saw on the cable. Use trusted networks.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="2.5" width="12" height="15" rx="1.5"/><path d="M7 14.5h6" stroke-linecap="round"/></svg></span><span class="badge beta">Beta</span></header>
+            <h4>reMarkable 2 and 1</h4><p>Built with reMarkable's official SDKs and started under emulation. Not yet run on a real rM2 or rM1: pen direction, tilt and palm sizes need one test session.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 16l3-3M3 5l4 4-4 4M9 15h8"/></svg></span><span class="badge beta">Preview</span></header>
+            <h4>Linux</h4><p>A virtual pen tablet through uinput, so it works on Wayland (Hyprland, Sway, GNOME, KDE) and X11. First build, not yet tested on a real Linux desktop.</p></article>
+          <article class="feat"><header><span class="ico"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="8" r="2.5"/><circle cx="13" cy="8" r="2.5"/><path d="M4 16c1-2 5-2 6 0M10 16c1-2 5-2 6 0"/></svg></span><span class="badge beta">Beta</span></header>
+            <h4>Windows touch</h4><p>An option per panel profile that sends your fingers to Windows as a touchscreen, for apps with their own touch scrolling and zoom.</p></article>
+        </div>
+      </div>
+    </div>
+
+    <div class="gest rise">
+      <div class="sec-head" style="margin-bottom:0">
+        <span class="eyebrow">Finger gestures</span>
+        <h2>Your other hand does the rest.</h2>
+        <p>The defaults follow Photoshop. Krita and Clip Studio use most of the same keys, and you can change any of them on the
+          <b>Panel &amp; gestures</b> page.</p>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Gesture</th><th>Does</th><th>Since</th></tr></thead>
+          <tbody>
+            <tr><td>3 fingers, swipe left / right</td><td>Undo / redo, live, one step per stretch of swipe</td><td><span class="badge out">0.9.0</span></td></tr>
+            <tr><td>2 fingers, drag</td><td>Pan (holds Space and drags)</td><td><span class="badge out">0.9.0</span></td></tr>
+            <tr><td>2 fingers, pinch</td><td>Zoom in / out (<kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd>)</td><td><span class="badge out">0.9.0</span></td></tr>
+            <tr><td>1 finger, triple tap</td><td>New layer by default, any keys you like</td><td><span class="badge out">0.9.0</span></td></tr>
+            <tr><td>5 fingers, twist</td><td>Rotate the canvas</td><td><span class="badge next">Next</span></td></tr>
+            <tr><td>5 fingers, double tap</td><td>Reset the canvas rotation (Krita: <kbd>5</kbd>)</td><td><span class="badge next">Next</span></td></tr>
+            <tr><td>5 fingers, swipe down</td><td>Clear the tablet ink and refresh the whole e-paper screen</td><td><span class="badge next">Next</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================== gallery -->
+<section id="gallery">
+  <div class="wrap">
+    <div class="sec-head rise">
+      <span class="eyebrow">The desktop app</span>
+      <h2>Set it up once, then just plug in.</h2>
+      <p>Screenshots from version 0.9.1, shown with sample data.</p>
+    </div>
+    <div class="gallery rise">
+      <figure><img src="screenshots/home.png" alt="Home page: connected, live pen view with pressure and tilt readouts" loading="lazy" width="1860" height="1230"><figcaption><b>Home.</b> Live pen view with pressure, tilt and where the pen lands.</figcaption></figure>
+      <figure><img src="screenshots/calibrate.png" alt="Calibration page with targets" loading="lazy" width="1860" height="1230"><figcaption><b>Calibrate.</b> Tap 9, 4 or 0 targets.</figcaption></figure>
+      <figure><img src="screenshots/mapping.png" alt="Screen area page with display picker and active area" loading="lazy" width="1860" height="1230"><figcaption><b>Screen area.</b> Pick a display and the part of the tablet you use.</figcaption></figure>
+      <figure><img src="screenshots/pen.png" alt="Pen feel page with pressure curve" loading="lazy" width="1860" height="1230"><figcaption><b>Pen feel.</b> Pressure curve, threshold, tilt, shapes.</figcaption></figure>
+      <figure><img src="screenshots/panel.png" alt="Panel and gestures editor" loading="lazy" width="1860" height="1230"><figcaption><b>Panel &amp; gestures.</b> Design the 16 buttons and the tap gestures.</figcaption></figure>
+      <figure class="tall"><img src="screenshots/tablet.png" alt="The Paper Pro screen: shortcut panel on the left, drawing area with strokes" loading="lazy" width="1440" height="1080"><figcaption><b>On the tablet.</b> The shortcut panel and your strokes on e-paper.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================== download -->
+<section id="download">
+  <div class="wrap">
+    <div class="sec-head rise">
+      <span class="eyebrow">Download</span>
+      <h2>Version 0.9.1</h2>
+      <p>Released 28 October 2026. Free under the MIT licence. The builds are not code-signed yet, so Windows SmartScreen
+        may warn the first time: choose <b>More info</b>, then <b>Run anyway</b>.</p>
+    </div>
+    <div class="downloads rise">
+      <article class="dl main">
+        <header><span class="os">Windows · recommended</span><span class="badge out">Stable</span></header>
+        <h3>Installer</h3>
+        <p>Installs for your user account with no admin rights. Start-menu entry, optional desktop shortcut, and an uninstaller
+          that keeps your settings and calibration. Adds the WebView2 runtime if it is missing.</p>
+        <div class="file">PaperTablet-Setup-0.9.1.exe</div>
+        <a class="btn primary" href="https://github.com/AmazingBodilyFluids/paper-tablet/releases/download/v0.9.1/PaperTablet-Setup-0.9.1.exe">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 16h12"/></svg>
+          Download installer</a>
+      </article>
+      <article class="dl">
+        <header><span class="os">Windows</span><span class="badge out">Stable</span></header>
+        <h3>Portable</h3>
+        <p>No installation. Unzip anywhere, even onto a USB stick, and run <b>Paper Tablet</b>. Settings, calibration, the app's key
+          and the log stay in the <code>data</code> folder beside it. Needs WebView2, which current Windows already has.</p>
+        <div class="file">PaperTablet-Portable-0.9.1.zip</div>
+        <a class="btn" href="https://github.com/AmazingBodilyFluids/paper-tablet/releases/download/v0.9.1/PaperTablet-Portable-0.9.1.zip">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 16h12"/></svg>
+          Download zip</a>
+      </article>
+      <article class="dl">
+        <header><span class="os">Linux</span><span class="badge beta">Preview</span></header>
+        <h3>From the linux branch</h3>
+        <p>One setup script installs the window libraries, a private Python environment and a udev rule for the virtual pen.
+          Log out and back in once afterwards. Not yet tested on a real Linux desktop.</p>
+        <div class="cmd"><pre id="linuxCmd">git clone -b linux https://github.com/AmazingBodilyFluids/paper-tablet.git
+cd paper-tablet
+./linux/setup.sh</pre><button class="copy" type="button" data-copy="linuxCmd">Copy</button></div>
+        <a class="btn" href="https://github.com/AmazingBodilyFluids/paper-tablet/tree/linux/linux">Linux guide on GitHub</a>
+      </article>
+    </div>
+    <div class="reqs rise">
+      <div><b>Tablet</b>reMarkable Paper Pro with developer mode on, tested on software 3.29. reMarkable 2 or 1 on 3.28 or newer in beta, no developer mode needed.</div>
+      <div><b>PC</b>Windows 10 (1809 or newer) or Windows 11, 64-bit, and the USB-C cable. Linux with Wayland or X11 for the preview.</div>
+      <div><b>Your drawing app</b>Photoshop uses Windows Ink by default. In Krita, Clip Studio, Illustrator and Affinity pick the Windows Ink tablet mode. WinTab-only apps get no pressure.</div>
+    </div>
+    <p class="fine" style="margin-top:20px">All releases and their notes: <a href="https://github.com/AmazingBodilyFluids/paper-tablet/releases">GitHub Releases</a>.
+      To run from source, clone the repo and double-click <code>Paper Tablet.bat</code> (Python 3.10+).</p>
+  </div>
+</section>
+
+<!-- ================================================================= setup -->
+<section id="setup">
+  <div class="wrap">
+    <div class="sec-head rise">
+      <span class="eyebrow">Setup</span>
+      <h2>Ten minutes, once.</h2>
+      <p>The setup guide opens by itself on first run and walks you through these steps.</p>
+    </div>
+    <div class="steps rise">
+      <div class="step"><h4>Back up your notebooks</h4><p>Turning on developer mode resets a Paper Pro. Sync to the cloud or export first.</p></div>
+      <div class="step"><h4>Turn on developer mode</h4><p>It is reMarkable's own feature. Read their guide, then plug the tablet into the PC.</p></div>
+      <div class="step"><h4>Pair</h4><p>Type the tablet's password once. The app uses it to install its own key and never stores it.</p></div>
+      <div class="step"><h4>Calibrate</h4><p>Say how the tablet lies on your desk and tap the targets. After that, plugging in is all it takes.</p></div>
+    </div>
+    <ul class="safety rise">
+      <li>Nothing permanent: the tablet programs run from <code>/tmp</code>, which clears on every reboot.</li>
+      <li>The notebook app is always restarted when you unplug, close the app, or press the power button.</li>
+      <li>Your notebooks are never read or changed.</li>
+      <li>The connection stays on the USB link unless you turn on Wi-Fi yourself.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- =============================================================== history -->
+<section id="history">
+  <div class="wrap">
+    <div class="sec-head rise">
+      <span class="eyebrow">Version history</span>
+      <h2>What changed, and when.</h2>
+      <p>From the project's releases and commit history on GitHub.</p>
+    </div>
+    <div class="timeline">
+      <article class="rel unreleased rise">
+        <div class="rel-meta"><span class="v">Next</span><time>in testing</time><span class="sha">main branch</span></div>
+        <div class="rel-body">
+          <h3>Masks, paper, palm rejection, Wi-Fi and more tablets</h3>
+          <ul>
+            <li><b class="k-new">New</b><span>Pen mask from any image: 720 × 720, 256 shades, Fade or Firmer press, contrast, Invert, a named library and a corner tab on the tablet.</span></li>
+            <li><b class="k-new">New</b><span>Paper patterns, a movable and zoomable tracing image, and the front light to full while tracing.</span></li>
+            <li><b class="k-new">New</b><span>Palm rejection by contact size, a 3 s stuck-touch sweep, and the pen lifts at the edge of the active area.</span></li>
+            <li><b class="k-new">New</b><span>Panel profiles: named button sets, switched with arrows on the tablet.</span></li>
+            <li><b class="k-new">New</b><span>Five-finger twist rotates the canvas, double tap resets it, swipe down clears the ink and refreshes the screen.</span></li>
+            <li><b class="k-new">New</b><span>Live finger view in the app, and Windows touch as a per-profile option.</span></li>
+            <li><b class="k-new">New</b><span>"Until cleared" for the ink trail on the tablet.</span></li>
+            <li><b class="k-beta">Beta</b><span>Connect over Wi-Fi once paired on the cable.</span></li>
+            <li><b class="k-beta">Beta</b><span>reMarkable 2 and reMarkable 1 support.</span></li>
+            <li><b class="k-chg">Change</b><span>Intaglio is the default theme.</span></li>
+            <li><b class="k-fix">Fix</b><span>Most option switches in the desktop app could not be clicked since 0.9.0; they now work.</span></li>
+            <li><b class="k-fix">Fix</b><span>A resting finger no longer sends the same report many times a second.</span></li>
+          </ul>
+        </div>
+      </article>
+      <article class="rel rise">
+        <div class="rel-meta"><span class="v">0.9.1</span><time datetime="2026-10-28">28 Oct 2026</time><a class="sha" href="https://github.com/AmazingBodilyFluids/paper-tablet/releases/tag/v0.9.1">release notes</a></div>
+        <div class="rel-body">
+          <h3>Tray, resizable window, themes</h3>
+          <ul>
+            <li><b class="k-new">New</b><span>Tray icon: open the window, turn pen input on or off, or exit. The icon shows whether the pen is on.</span></li>
+            <li><b class="k-new">New</b><span>Close to tray, so the pen keeps working with the window shut (switch off in Settings → Behaviour).</span></li>
+            <li><b class="k-new">New</b><span>Resizable window, and four themes from the swatches in the title bar.</span></li>
+            <li><b class="k-fix">Known</b><span>Most option switches cannot be clicked in this build; the two Home switches work. Fixed for the next release.</span></li>
+          </ul>
+        </div>
+      </article>
+      <article class="rel rise">
+        <div class="rel-meta"><span class="v">0.9.0</span><time datetime="2026-10-28">28 Oct 2026</time><a class="sha" href="https://github.com/AmazingBodilyFluids/paper-tablet/releases/tag/v0.9.0">release notes</a></div>
+        <div class="rel-body">
+          <h3>First packaged release</h3>
+          <ul>
+            <li><b class="k-new">New</b><span>Installer and portable zip. No Python needed.</span></li>
+            <li><b class="k-new">New</b><span>Windows Ink pen with pressure, tilt, hover and eraser; plug and play; calibration; screen area; pen feel.</span></li>
+            <li><b class="k-new">New</b><span>Ink trail on the tablet screen, the 16-button shortcut panel, hold to snap, and finger gestures for undo, redo, pan and zoom.</span></li>
+          </ul>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <p>Paper Tablet is an independent project. It is not made, endorsed or supported by reMarkable AS. "reMarkable" and "Paper Pro"
+        are trademarks of reMarkable AS, used here only to say which device this works with.</p>
+      <p>MIT licence. IBM Plex, Work Sans and Libre Franklin are under the SIL Open Font License.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/AmazingBodilyFluids/paper-tablet">Source</a>
+      <a href="https://github.com/AmazingBodilyFluids/paper-tablet/releases">Releases</a>
+      <a href="https://github.com/AmazingBodilyFluids/paper-tablet/blob/main/docs/TECHNICAL.md">Technical notes</a>
+      <a href="https://github.com/AmazingBodilyFluids/paper-tablet/issues">Report a problem</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="site/site.js"></script>
+</body>
+</html>
