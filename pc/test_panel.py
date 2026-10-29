@@ -1,9 +1,12 @@
 """Panel buttons, key combinations and tablet actions (no Windows, no tablet needed)."""
 import threading
 import types
+import base64
 import unittest
+import zlib
 
 import core
+import penmask
 import rmtablet as rt
 import keys
 
@@ -230,6 +233,8 @@ class PaperAndTrace(Profiles):
 
 
 class TraceMask(Profiles):
+    N = penmask.N
+
     def state(self, x, y):
         return rt.PenState(x=x, y=y, pen=True)
 
@@ -238,33 +243,39 @@ class TraceMask(Profiles):
         e.mapper = rt.Mapper(absinfo={"X": {"min": 0, "max": 7199}, "Y": {"min": 0, "max": 7199},
                                       "PRESSURE": {"min": 0, "max": 4096}}, monitor=(0, 0, 1920, 1080), fit="stretch")
         e.cal = None
+        e.pmask = penmask.Mask()
+        e.push_mask = lambda: e.companion.lines.append("maskimg")
         return e
 
-    def test_mask_round_trip_and_hit_test(self):
+    def cell(self, c, r):  # the middle of a cell, in digitizer units (7200 / N per cell)
+        k = 7200 / self.N
+        return self.state(int((c + 0.5) * k), int((r + 0.5) * k))
+
+    def test_mask_from_the_page_and_hit_test(self):
         e = self.masked_engine()
-        lv = bytearray(core.MASK_N * core.MASK_N)
-        lv[0] = 15                      # top-left cell
-        lv[10 * core.MASK_N + 20] = 15  # row 10, column 20
-        lv[10 * core.MASK_N + 22] = 8   # a grey cell
-        e.tablet_action("mask " + "".join(f"{v:x}" for v in lv))
-        self.assertTrue(e.cfg["mask_on"])  # painting a mask switches it on
-        self.assertEqual(core.mask_levels(e.cfg["mask"]), bytes(lv))
-        self.assertTrue(e.masked(self.state(50, 50)))
-        self.assertTrue(e.masked(self.state(20 * 100 + 50, 10 * 100 + 50)))
-        self.assertFalse(e.masked(self.state(21 * 100 + 50, 10 * 100 + 50)))
-        self.assertEqual(e.mask_level(self.state(22 * 100 + 50, 10 * 100 + 50)), 8)
+        lv = bytearray(self.N * self.N)
+        lv[0] = 255
+        lv[100 * self.N + 200] = 255
+        lv[100 * self.N + 220] = 128
+        e.set_mask(base64.b64encode(bytes(lv)).decode())
+        self.assertTrue(e.cfg["mask_on"])  # making a mask switches it on
+        self.assertIn("maskimg", e.companion.lines)
+        self.assertTrue(e.masked(self.cell(0, 0)))
+        self.assertTrue(e.masked(self.cell(200, 100)))
+        self.assertFalse(e.masked(self.cell(201, 100)))
+        self.assertEqual(e.mask_level(self.cell(220, 100)), 128)
         e.set("mask_on", False)
-        self.assertFalse(e.masked(self.state(50, 50)))
+        self.assertFalse(e.masked(self.cell(0, 0)))
 
     def test_grey_fades_or_gates_the_pressure(self):
         e = self.masked_engine()
         s = rt.PenState(x=1, y=1, pen=True, touch=True, pressure=2048)
         self.assertEqual(e.mask_pressure(s, 0).pressure, 2048)
-        self.assertEqual(e.mask_pressure(s, 15).pressure, 0)
-        self.assertEqual(e.mask_pressure(s, 5).pressure, round(2048 * 10 / 15))  # fade: a third lighter
+        self.assertEqual(e.mask_pressure(s, 255).pressure, 0)
+        self.assertEqual(e.mask_pressure(s, 85).pressure, round(2048 * 170 / 255))  # fade: a third lighter
         e.set("mask_mode", "gate")
-        self.assertEqual(e.mask_pressure(s, 9).pressure, 0)      # below the 60% threshold: no ink
-        self.assertEqual(e.mask_pressure(s, 3).pressure, round(4096 * (0.5 - 0.2) / 0.8))
+        self.assertEqual(e.mask_pressure(s, 153).pressure, 0)     # below the 60% threshold: no ink
+        self.assertEqual(e.mask_pressure(s, 51).pressure, round(4096 * (0.5 - 0.2) / 0.8))
         e.set("mask_mode", "bogus")
         self.assertEqual(e.cfg["mask_mode"], "fade")
 
@@ -273,26 +284,41 @@ class TraceMask(Profiles):
         e.mapper, e.cal = object(), None
         self.assertTrue(e.masked(self.state(1, 1)))
 
-    def test_bad_masks_are_cleaned(self):
-        self.assertEqual(len(core.clean_mask("zz12")), core.MASK_N * core.MASK_N)
-        self.assertEqual(core.clean_mask("F")[0], "f")
-
     def test_contrast_applies_over_the_stored_mask(self):
-        e = self.masked_engine()
-        raw = "4" * 10 + "b" * 10
-        e.set("mask", raw)
+        e = self.masked_engine(mask_on=True)
+        lv = bytearray(self.N * self.N)
+        lv[0], lv[1] = 64, 191
+        e.pmask.set_raw(lv)
         e.set("mask_contrast", 2.0)
-        e.set("mask_on", True)
-        self.assertEqual(core.mask_contrasted(raw, 2)[:20], "1" * 10 + "f" * 10)
-        self.assertEqual(e.mask_level(self.state(50, 50)), 1)
-        self.assertEqual(e.cfg["mask"][:20], raw)          # stored as it was
-        shown = core.mask_contrasted(e.cfg["mask"], 2)
-        e.tablet_action("mask " + "f" + shown[1:])         # the tablet painted one cell
-        self.assertEqual(e.cfg["mask"][:20], "f" + raw[1:])
+        self.assertEqual((e.pmask.eff[0], e.pmask.eff[1]), (1, 255))
+        self.assertEqual(e.pmask.raw[:2], bytearray([64, 191]))   # stored as it was
+        self.assertEqual(e.mask_level(self.cell(1, 0)), 255)
 
-    def test_old_on_off_masks_become_levels(self):
-        old = "8" + "0" * (core.MASK_N * core.MASK_N // 4 - 1)  # only the first cell set
-        self.assertEqual(core.clean_mask(old)[:5], "f0000")
+    def test_painting_and_dragging_on_the_tablet(self):
+        e = self.masked_engine()
+        e.tablet_action(f"maskpaint 255 0.01 0.01 0.5 0.5")
+        self.assertTrue(e.cfg["mask_on"])
+        self.assertTrue(e.masked(self.state(3600, 3600)))
+        self.assertFalse(e.masked(self.state(3600 + 200, 3600)))   # radius 1% = 72 units
+        e.tablet_action("maskmove 0.1 0")
+        self.assertFalse(e.masked(self.state(3600, 3600)))
+        self.assertTrue(e.masked(self.state(3600 + 720, 3600)))
+        e.tablet_action("maskpaint 0 0.02 0.02 0.6 0.5")              # the eraser end
+        self.assertFalse(e.masked(self.state(3600 + 720, 3600)))
+
+    def test_old_hex_masks_carry_over(self):
+        old = "8" + "0" * (72 * 72 // 4 - 1)  # 1-bit format: only the first cell set
+        lv = penmask.legacy(old)
+        f = self.N // 72
+        self.assertEqual((lv[0], lv[f - 1], lv[f], lv[(f - 1) * self.N], lv[f * self.N]), (255, 255, 0, 255, 0))
+        self.assertEqual(penmask.legacy("0" * 5184), None)
+        self.assertEqual(penmask.legacy("8" * 5184)[0], 136)    # level format: 8 of 15
+
+    def test_png_is_a_valid_image(self):
+        png = penmask.png_la(bytes(range(16)) * 1, n=4)
+        self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
+        raw = zlib.decompress(png[png.index(b"IDAT") + 4:png.index(b"IEND") - 8])
+        self.assertEqual(raw[:9], bytes([0, 0, 0, 0, 1, 0, 2, 0, 3]))
 
 
 class PanelGeometry(unittest.TestCase):

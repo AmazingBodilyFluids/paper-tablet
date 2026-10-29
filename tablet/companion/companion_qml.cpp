@@ -58,13 +58,16 @@ Window {
     property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
     property bool lightOn: false
     property bool nativeTouch: false     // fingers go to Windows as real touch, no gestures here
-    // trace mask: a 72 x 72 grid over the view; set cells are where the pen does nothing in Windows.
-    // In edit mode the pen paints cells (eraser end clears) and one finger drags the whole mask.
-    readonly property int maskN: 72
-    property var maskBits: []            // maskN * maskN levels 0 (open) .. 15 (pen ignored), row by row
+    // pen mask: the PC keeps it and sends it as an image (black, alpha = how masked). In edit mode
+    // the pen paints it (eraser end clears) and one finger drags it; both go to the PC, which sends
+    // the new image back. Until then the dabs and the drag show here.
+    property string maskSrc: ""
     property bool maskOn: false
     property bool maskEdit: false
-    property var maskRuns: []            // [row, first col, last col] runs, what the overlay draws
+    property real maskBrush: 45          // brush radius, view pixels
+    property int maskPaintV: -1          // 255 paint / 0 erase for the dabs not yet sent
+    property var maskPts: []             // their centres, as fractions of the view
+    property var maskLast: null
     property real maskDX: 0              // live finger drag while editing, in view pixels
     property real maskDY: 0
     property int profileCount: 1
@@ -96,7 +99,7 @@ Window {
     onAdjChanged: { if (!adj && imgMoved) { imgMoved = false; fullRefresh() } else epMode() }
     onMaskOnChanged: refreshScreen()
     onMaskEditChanged: refreshScreen()
-    onMaskRunsChanged: refreshScreen()
+    onMaskSrcChanged: refreshScreen()
     onMaskDXChanged: refreshScreen()
     onMaskDYChanged: refreshScreen()
     onAreaChanged: refreshScreen()
@@ -152,8 +155,8 @@ Window {
         else if (c === "traceadjust") traceAdjust = a[0] === "1"
         else if (c === "mask") {  // mask <on> <edit> <hex>
             maskOn = a[0] === "1"; maskEdit = a[1] === "1"
-            if (a.length > 2) { maskBits = maskFromHex(a[2]); maskRedraw() }
         }
+        else if (c === "maskimg") { maskSrc = ""; maskSrc = "file://" + a.join(" ") }
         else if (c === "profile") { profileCount = parseInt(a[1]); profileName = a.slice(2).join(" ") }
         else if (c === "gestures") {
             gesturesOn = a[0] === "1"
@@ -202,53 +205,22 @@ Window {
     }
 
     // ---- trace mask
-    function maskFromHex(h) {  // one hex digit per cell
-        var n = maskN * maskN, out = new Array(n)
-        for (var i = 0; i < n; i++) out[i] = parseInt(h.charAt(i), 16) || 0
-        return out
+    function maskPaint(p, value) {
+        if (value !== maskPaintV) { maskFlush(); maskPaintV = value }
+        if (maskLast && Math.abs(p.x - maskLast.x) + Math.abs(p.y - maskLast.y) < maskBrush / 3) return
+        maskLast = p
+        maskPts.push((p.x / view.width).toFixed(4), (p.y / view.height).toFixed(4))
+        dab.createObject(maskDabs, {x: p.x - maskBrush, y: p.y - maskBrush, r: maskBrush, erase: value === 0})
     }
-    function maskHex() {
-        var s = "", n = maskN * maskN
-        for (var i = 0; i < n; i++) s += maskBits[i].toString(16)
-        return s
+    function maskFlush() {
+        if (maskPts.length)
+            act("maskpaint " + maskPaintV + " " + (maskBrush / view.width).toFixed(4) + " "
+                + (maskBrush / view.height).toFixed(4) + " " + maskPts.join(" "))
+        maskPts = []; maskLast = null
     }
-    function maskRedraw() {  // runs of one level: [row, first col, last col, level]
-        var runs = []
-        for (var r = 0; r < maskN; r++) {
-            var c0 = -1, lv = 0
-            for (var c = 0; c <= maskN; c++) {
-                var v = c < maskN ? maskBits[r * maskN + c] : 0
-                if (c0 >= 0 && v !== lv) { runs.push([r, c0, c - 1, lv]); c0 = -1 }
-                if (v && c0 < 0) { c0 = c; lv = v }
-            }
-        }
-        maskRuns = runs
-    }
-    function maskGrey(level) {  // open: no shade; full: mid grey (darker while editing)
-        var g = Math.round(255 - level / 15 * (maskEdit ? 153 : 102))
-        return Qt.rgba(g / 255, g / 255, g / 255, 1)
-    }
-    function maskPaint(p, value) {  // a round brush, 2 cells across each way
-        var cx = Math.floor(p.x / view.width * maskN), cy = Math.floor(p.y / view.height * maskN), hit = false
-        for (var dy = -2; dy <= 2; dy++)
-            for (var dx = -2; dx <= 2; dx++) {
-                if (dx * dx + dy * dy > 5) continue
-                var x = cx + dx, y = cy + dy
-                if (x < 0 || y < 0 || x >= maskN || y >= maskN) continue
-                if (maskBits[y * maskN + x] !== value) { maskBits[y * maskN + x] = value; hit = true }
-            }
-        if (hit) maskTimer.start()
-    }
-    Timer { id: maskTimer; interval: 120; onTriggered: win.maskRedraw() }
-    function maskShift(dx, dy) {  // move the whole mask by whole cells
-        var out = new Array(maskN * maskN)
-        for (var r = 0; r < maskN; r++)
-            for (var c = 0; c < maskN; c++) {
-                var sr = r - dy, sc = c - dx
-                out[r * maskN + c] = sr >= 0 && sc >= 0 && sr < maskN && sc < maskN ? maskBits[sr * maskN + sc] : 0
-            }
-        maskBits = out
-        maskRedraw()
+    function maskShown() {  // the PC's new image is up: the local dabs and drag are in it now
+        for (var i = maskDabs.children.length - 1; i >= 0; i--) maskDabs.children[i].destroy()
+        maskDX = 0; maskDY = 0
     }
     property var maskDrag: null
     property bool maskDirty: false
@@ -259,9 +231,9 @@ Window {
             if (Math.abs(maskDX) + Math.abs(maskDY) < 20 && hintHit(maskHint, maskDrag)) {
                 maskDX = 0; maskDY = 0; maskDrag = null; act("maskedit"); return  // "tap here when done"
             }
-            var dx = Math.round(maskDX / view.width * maskN), dy = Math.round(maskDY / view.height * maskN)
-            maskDX = 0; maskDY = 0; maskDrag = null
-            if (dx || dy) { maskShift(dx, dy); act("mask " + maskHex()) }
+            maskDrag = null
+            if (Math.abs(maskDX) + Math.abs(maskDY) < 3) { maskDX = 0; maskDY = 0; return }
+            act("maskmove " + (maskDX / view.width).toFixed(4) + " " + (maskDY / view.height).toFixed(4))
         }
     }
     function hintHit(item, p) {
@@ -361,8 +333,8 @@ Window {
         }
         if (maskEdit && mode === "ink") {  // painting the mask: the pen stays on the tablet
             endStroke()
-            if (touching) { maskPaint(p, eraser ? 0 : 15); maskDirty = true }
-            else if (maskDirty) { maskDirty = false; maskRedraw(); act("mask " + maskHex()) }
+            if (touching) { maskPaint(p, eraser ? 0 : 255); maskDirty = true }
+            else if (maskDirty) { maskDirty = false; maskFlush() }
             return
         }
         penDown = touching
@@ -634,6 +606,15 @@ Window {
         }
     }
 
+    Component {  // a mask brush dab, shown until the PC's image has it
+        id: dab
+        Rectangle {
+            property real r: 10
+            property bool erase: false
+            width: 2 * r; height: 2 * r; radius: r
+            color: erase ? "white" : "#666666"; antialiasing: false
+        }
+    }
     Component {
         id: seg
         Item {  // zero-size pivot at the segment start; rotation turns it toward the end point
@@ -674,18 +655,17 @@ Window {
                 active: win.paper !== "plain"
                 sourceComponent: win.paper === "dots" || win.paper === "cross" ? marks : lines
             }
-            Item {  // trace mask: masked cells as a light grey (the pen does nothing there)
+            Item {  // pen mask: shaded where the pen is held back (darker while editing)
                 visible: win.maskOn || win.maskEdit
                 x: -paperArea.x + win.maskDX; y: win.maskDY; width: view.width; height: view.height
-                Repeater {
-                    model: win.maskRuns
-                    Rectangle {
-                        x: modelData[1] * view.width / win.maskN; y: modelData[0] * view.height / win.maskN
-                        width: (modelData[2] - modelData[1] + 1) * view.width / win.maskN + 0.5
-                        height: view.height / win.maskN + 0.5
-                        color: win.maskGrey(modelData[3]); antialiasing: false
-                    }
+                Image {
+                    anchors.fill: parent
+                    source: win.maskSrc
+                    cache: false; smooth: true
+                    opacity: win.maskEdit ? 0.6 : 0.4
+                    onStatusChanged: if (status === Image.Ready) win.maskShown()
                 }
+                Item { id: maskDabs; anchors.fill: parent }
             }
             Rectangle {  // mask editing: say what the pen and fingers do now
                 visible: win.maskEdit; anchors.fill: parent; anchors.margins: 6

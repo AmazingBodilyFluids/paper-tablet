@@ -21,6 +21,7 @@ import time
 
 import rmtablet as rt
 import keys
+import penmask
 import paths
 import shapes
 
@@ -55,8 +56,8 @@ DEFAULTS = {
     "paper": "plain", "paper_mm": 5.0,
     "trace_file": "", "trace_opacity": 0.5, "trace_scale": 1.0, "trace_x": 0.0, "trace_y": 0.0,
     "trace_adjust": False, "light": False,
-    # pen mask: MASK_N x MASK_N cells over the tablet screen, one hex digit each (row by row): 0 open,
-    # f the pen does nothing in Windows, in between partly masked (mask_mode: "fade" scales the pressure
+    # pen mask (penmask.py, kept in its own file; "mask" is only the old hex form, carried over once):
+    # black: the pen does nothing in Windows, grey: partly masked (mask_mode: "fade" scales the pressure
     # down, "gate" needs a firmer press). Painted on the tablet in edit mode or made from an image.
     "mask": "", "mask_on": False, "mask_edit": False, "mask_mode": "fade",
     "mask_contrast": 1.0,   # applied over the stored mask: >1 pushes greys towards black / white
@@ -92,7 +93,7 @@ DEFAULT_TAPS = {"1x2": {"t": "", "keys": ""}, "1x3": {"t": "New layer", "keys": 
                 "5x2": {"t": "Reset rotation", "keys": "r+esc"}}
 DEFAULTS["taps"] = DEFAULT_TAPS
 BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "trace", "light", "mask", "none")
-MASK_N = 72
+MASK_N = penmask.N
 # fingers: "shortcuts" turns gestures into keys (pan = Space+drag ...); "windows" hands every
 # contact to Windows as real touch, so apps do their own scrolling, zooming and inertia
 TOUCH_MODES = ("shortcuts", "windows")
@@ -102,31 +103,8 @@ TRACE_MAX_BYTES = 30 * 1024 * 1024
 FRONTLIGHT = "/sys/class/backlight/rm_frontlight"
 
 
-def clean_mask(h):
-    """A mask as exactly MASK_N * MASK_N lower-case hex digits, one level per cell (empty or bad
-    input: nothing masked). The old on / off format (four cells per digit) becomes 0 / f."""
-    n = MASK_N * MASK_N
-    h = "".join(c for c in str(h or "").lower() if c in "0123456789abcdef")
-    if len(h) == n // 4:
-        h = "".join("f" if (int(c, 16) >> (3 - k)) & 1 else "0" for c in h for k in range(4))
-    h = h[:n]
-    return h + "0" * (n - len(h))
-
-
-def mask_levels(h):
-    """Hex mask -> bytes of 0 (open) .. 15 (fully masked), one per cell."""
-    return bytes(int(c, 16) for c in clean_mask(h))
-
-
 MASK_MODES = ("fade", "gate")
 
-
-def mask_contrasted(h, k):
-    """The mask as used: each level pushed away from mid grey by k (1 = as stored), as hex."""
-    k = float(k or 1)
-    if k == 1:
-        return clean_mask(h)
-    return "".join(f"{max(0, min(15, math.floor(8 + (int(c, 16) - 7.5) * k))):x}" for c in clean_mask(h))
 
 
 def clean_profiles(profiles, current=None):
@@ -321,6 +299,7 @@ class Companion:
         self.chan = None
         self.tab = None
         self.trace_sent = None  # (path, mtime, size) of the image on the tablet
+        self.mask_sent = None   # version of the pen mask on the tablet
         self.log = collections.deque(maxlen=300)
         self.started_at = 0
 
@@ -363,7 +342,7 @@ class Companion:
         if self.running or time.time() - self.started_at < 4:
             return  # one hand-over at a time: overlapping sessions fight over the panel
         self.started_at = time.time()
-        self.tab, self.trace_sent = tab, None
+        self.tab, self.trace_sent, self.mask_sent = tab, None, None
         src = os.path.join(rt.HERE, "..", "tablet", "companion")
         tab.run(f"mkdir -p {self.REMOTE}")
         for name in self.FILES:
@@ -593,7 +572,13 @@ class Engine:
         self.last_action = None
         self.touch = None       # the latest finger report from the tablet, for the live view
         self.touch_out = None   # WindowsTouch, made when a profile first uses Windows touch
-        self.mask = mask_levels(mask_contrasted(self.cfg.get("mask"), self.cfg.get("mask_contrast")))
+        mask_path = os.path.join(os.path.dirname(rt.CONFIG_PATH), "penmask.bin")
+        fresh = not os.path.exists(mask_path)
+        self.pmask = penmask.Mask(mask_path, self.cfg.get("mask_contrast"))
+        old = penmask.legacy(self.cfg.get("mask"))
+        if old is not None and fresh:
+            self.pmask.set_raw(old)
+        self.cfg["mask"] = ""
         self.rate = RateMeter()
         self.mapper = None
         self.refresh_mapper()
@@ -648,7 +633,7 @@ class Engine:
             "snap_last": self.snap_last, "last_action": self.last_action, "held_keys": sorted(self.keys.held),
             "view": self.view_size(), "panel_px": PANEL_PX, "tab_px": TAB_PX,
             "key_names": sorted(keys.VK), "key_labels": keys.LABEL, "default_buttons": DEFAULT_BUTTONS,
-            "pen_rate": self.rate.last, "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
+            "pen_rate": self.rate.last, "mask_ver": self.pmask.ver, "mask_pct": round(100 * self.pmask.coverage()), "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
         }
 
     def live(self):
@@ -710,15 +695,13 @@ class Engine:
                 val = max(0.05, min(20.0, float(val)))
             if key in ("trace_x", "trace_y"):
                 val = float(val)
-            if key == "mask":
-                val = clean_mask(val)
             if key == "mask_contrast":
                 val = max(0.25, min(8.0, float(val)))
             if key == "mask_mode" and val not in MASK_MODES:
                 val = "fade"
             self.cfg[key] = val
-            if key in ("mask", "mask_contrast"):
-                self.mask = mask_levels(mask_contrasted(self.cfg["mask"], self.cfg.get("mask_contrast")))
+            if key == "mask_contrast":
+                self.pmask.set_contrast(val)
             self.refresh_mapper()
             self.save()
         if key in ("companion_rot", "panel", "panel_open"):
@@ -726,8 +709,10 @@ class Engine:
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
                    "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
                    "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
-                   "trace_adjust", "light", "mask", "mask_contrast", "mask_on", "mask_edit"):
+                   "trace_adjust", "light", "mask_on", "mask_edit"):
             self.sync_companion()
+        if key == "mask_contrast":
+            self.push_mask()
         if key == "light" and self.companion.running:
             threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
             self.companion.send("toast Front light: " + ("full" if val else "back to your level"))
@@ -763,20 +748,49 @@ class Engine:
         return a
 
     def mask_level(self, s):
-        """How masked the pen's spot is, 0 (open) .. 15 (Windows doesn't get the pen). Painting the
-        mask on the tablet counts as fully masked everywhere."""
+        """How masked the pen's spot is, 0 (open) .. 255 (penmask.FULL and up: Windows doesn't get
+        the pen). Painting the mask on the tablet counts as fully masked everywhere."""
         if not s.in_range or not self.mapper or self.cal is not None:
             return 0
         if self.cfg.get("mask_edit") and self.companion.running:
-            return 15
+            return 255
         if not self.cfg.get("mask_on"):
             return 0
-        p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
-        c, r = min(MASK_N - 1, max(0, int(p * MASK_N))), min(MASK_N - 1, max(0, int(q * MASK_N)))
-        return self.mask[r * MASK_N + c]
+        return self.pmask.level(*self.mapper.oriented(*self.mapper.uv(s.x, s.y)))
 
     def masked(self, s):
-        return self.mask_level(s) >= 15
+        return self.mask_level(s) >= penmask.FULL
+
+    # ---- pen mask changes, from the page or the tablet; each goes to the tablet as an image
+    def set_mask(self, b64):
+        self.pmask.set_b64(b64)
+        self.mask_changed()
+        return self.pmask.ver
+
+    def mask_op(self, name):
+        self.pmask.op(name)
+        self.mask_changed()
+
+    def mask_changed(self):
+        if not self.cfg.get("mask_on"):
+            self.set("mask_on", True)  # making a mask means wanting it
+        self.push_mask()
+        self.changed()
+
+    def push_mask(self):
+        """The mask as an image on the tablet (black, alpha = how masked, contrast applied)."""
+        c = self.companion
+        if not c.running or not c.tab or c.mask_sent == self.pmask.ver:
+            return
+        ver = self.pmask.ver
+        remote = f"{c.REMOTE}/mask{ver % 2}.png"
+        try:
+            c.tab.run(f"cat > {remote}", self.pmask.png())
+        except Exception as ex:
+            c.send(f"toast Mask not sent: {ex}")
+            return
+        c.mask_sent = ver
+        c.send(f"maskimg {remote}")
 
     def mask_pressure(self, s, level):
         """The pen over a partly masked spot. fade: pressure scaled down by the shade (a mid grey
@@ -785,7 +799,7 @@ class Engine:
         a = self.mapper.absinfo.get("PRESSURE") if self.mapper else None
         if not a or not level:
             return s
-        lo, span, f = a["min"], (a["max"] - a["min"]) or 1, level / 15
+        lo, span, f = a["min"], (a["max"] - a["min"]) or 1, level / 255
         n = min(1.0, max(0.0, (s.pressure - lo) / span))
         if self.cfg.get("mask_mode") == "gate":
             n = 0.0 if n <= f else (n - f) / (1 - f)
@@ -877,14 +891,13 @@ class Engine:
                 self.cfg["trace_x"], self.cfg["trace_y"] = float(parts[1]), float(parts[2])
                 self.cfg["trace_scale"] = max(0.05, min(20.0, float(parts[3])))
                 self.save()
-        elif name == "mask" and len(parts) == 2:  # painted or moved on the tablet
-            # the tablet shows the mask with the contrast applied: keep the stored level where it
-            # didn't change, take the tablet's where it did
-            raw = clean_mask(self.cfg.get("mask"))
-            shown, got = mask_contrasted(raw, self.cfg.get("mask_contrast")), clean_mask(parts[1])
-            self.set("mask", "".join(r if s_ == g else g for r, s_, g in zip(raw, shown, got)))
-            if not self.cfg.get("mask_on"):
-                self.set("mask_on", True)
+        elif name == "maskpaint" and len(parts) >= 6:  # maskpaint <0|255> <rx> <ry> p q p q ...
+            v = [float(x) for x in parts[1:]]
+            self.pmask.paint(255 if v[0] else 0, v[1], v[2], list(zip(v[3::2], v[4::2])))
+            self.mask_changed()
+        elif name == "maskmove" and len(parts) == 3:  # one finger dragged it, by a fraction of the screen
+            self.pmask.shift(float(parts[1]), float(parts[2]))
+            self.mask_changed()
         elif name == "maskedit":
             self.set("mask_edit", not self.cfg.get("mask_edit"))
         elif name == "traceadjust":
@@ -1224,8 +1237,8 @@ class Engine:
         c.send(f"trace {float(self.cfg['trace_opacity']):.2f} {float(self.cfg['trace_scale']):.4f} "
                f"{float(self.cfg['trace_x']):.1f} {float(self.cfg['trace_y']):.1f} {remote}")
         c.send(f"traceadjust {int(bool(self.cfg.get('trace_adjust')) and bool(remote))}")
-        c.send(f"mask {int(bool(self.cfg.get('mask_on')))} {int(bool(self.cfg.get('mask_edit')))} "
-               f"{mask_contrasted(self.cfg.get('mask'), self.cfg.get('mask_contrast'))}")
+        c.send(f"mask {int(bool(self.cfg.get('mask_on')))} {int(bool(self.cfg.get('mask_edit')))}")
+        self.push_mask()
         c.send("status Connected to PC. Pen " + ("on" if self.output_on else "off")
                + (", shapes on" if self.cfg.get("snap") else ""))
         if self.cal is not None:
