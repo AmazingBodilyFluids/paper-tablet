@@ -18,6 +18,7 @@
 //   state pen 0|1 snap 0|1        button states owned by the PC
 //   toast TEXT       short message in the panel
 //   unlatch          show all hold keys released (the PC released them)
+//   light PCT        front light level for the bar under the panel (-1 hides it)
 // Back to the PC, on stdout: "ACT:<action>" for panel buttons and finger gestures
 // (undo, redo, smaller, bigger, brush, eraser, zoomin, zoomout, fit, down/up KEY, pen 0|1, snap 0|1).
 //   quit
@@ -36,6 +37,7 @@
 
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -45,8 +47,31 @@
 
 // QML console output: "ACT:..." lines are actions for the PC and go to stdout on their own line;
 // everything else goes to stderr as before ("LOG:" marks our own diagnostics).
+// Front light from the light bar under the panel: set here at once, so dragging along the bar
+// doesn't wait for the PC, which is told afterwards ("ACT:lightset PCT") to keep the setting.
+static const char *FRONTLIGHT = "/sys/class/backlight/rm_frontlight";
+static void set_light(int pct) {
+    char path[96];
+    snprintf(path, sizeof path, "%s/max_brightness", FRONTLIGHT);
+    FILE *f = fopen(path, "r");
+    int top = 0;
+    if (f) { if (fscanf(f, "%d", &top) != 1) top = 0; fclose(f); }
+    if (top <= 0) return;
+    snprintf(path, sizeof path, "%s/brightness", FRONTLIGHT);
+    if ((f = fopen(path, "w"))) { fprintf(f, "%d\n", (top * pct + 50) / 100); fclose(f); }
+}
+
 static void on_message(QtMsgType, const QMessageLogContext &, const QString &msg) {
     QByteArray m = msg.toUtf8();
+    int li = m.indexOf("LIGHT:");
+    if (li >= 0) {
+        int pct = atoi(m.constData() + li + 6);
+        pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+        set_light(pct);
+        fprintf(stdout, "ACT:lightset %d\n", pct);
+        fflush(stdout);
+        return;
+    }
     int at = m.indexOf("ACT:");
     if (at >= 0) { fprintf(stdout, "%s\n", m.constData() + at); fflush(stdout); return; }
     int lg = m.indexOf("LOG:");

@@ -37,7 +37,6 @@
     <span class="ind" id="indPen" role="img" aria-label="Pen: off"><svg><use href="#i-pen"/></svg><i class="dot" id="penDot"></i></span>
     <span class="tb-sep"></span>
     <button class="tbt" id="tgOutput" aria-pressed="false"><svg><use href="#i-penwin"/></svg></button>
-    <button class="tbt" id="tgScreen" aria-pressed="false"><svg><use href="#i-tablet"/></svg></button>
     <button class="tbt" id="tgSnap" aria-pressed="false"><svg><use href="#i-shape"/></svg></button>
   </div>
   <button class="wb" title="Minimise" onclick="api().win_minimize()"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></button>
@@ -89,6 +88,8 @@
             <div class="pane-title">Tablet screen</div>
             <div class="opt" style="display:block"><div class="range-row"><span>Trail stays for</span><input type="range" min="250" max="5250" step="250" id="trailR"><span class="v" id="trailV"></span></div>
               <p class="hint mts">E-ink can't fade smoothly, so a stroke stays for this long after you lift the pen, then clears in one refresh. Slide all the way right for <b>Until cleared</b>: strokes stay until you press <i>Clear the tablet screen</i> below or a <i>Clear ink</i> button on the panel.</p></div>
+            <div class="opt" style="display:block" id="lightRow"><div class="range-row"><span>Front light</span><input type="range" min="0" max="100" step="10" id="lightR"><span class="v" id="lightV"></span></div>
+              <p class="hint mts">Also on the tablet, under the shortcut panel. Your own light level comes back when you unplug.</p></div>
             <div class="opt"><div class="tx"><div class="t1">Shortcut panel</div><div class="t2">16 buttons you choose yourself. Tap with a finger or the pen. <a onclick="go('panel')">Customise the buttons</a></div></div>
               <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
             <div class="opt"><div class="tx"><div class="t1">Finger gestures</div><div class="t2">Three fingers swipe left: undo, right: redo. Two fingers drag to pan, pinch to zoom.</div></div>
@@ -103,8 +104,6 @@
             <div class="opt" style="display:block"><div class="range-row"><span>Image strength</span><input type="range" min="0.1" max="1" step="0.05" data-key="trace_opacity" data-type="float"><span class="v" id="traceV"></span></div></div>
             <div class="opt"><div class="tx"><div class="t1">Move and zoom it on the tablet</div><div class="t2">While on, one finger drags the image and two fingers zoom it; gestures pause. It turns on by itself when you choose an image; tap the black note on the tablet to finish. A panel button can do this too ("Move image").</div></div>
               <div class="row"><button class="btn ghost" onclick="resetTrace()">Centre</button><label class="switch"><input type="checkbox" data-key="trace_adjust"><span class="track"></span></label></div></div>
-            <div class="opt"><div class="tx"><div class="t1">Front light to full</div><div class="t2">Lights the screen evenly for tracing. It's a front light, so it lights the image on screen rather than shining through paper laid on top. Your light level comes back when the tablet screen turns off.</div></div>
-              <label class="switch"><input type="checkbox" data-key="light"><span class="track"></span></label></div>
           </div>
         </div>
         <div class="stack">
@@ -270,7 +269,7 @@
                 <button data-k="snap"><b>Shapes on/off</b><span>Hold-to-snap shapes</span></button>
                 <button data-k="clear"><b>Clear ink</b><span>Only useful if trails are set to stay</span></button>
                 <button data-k="trace"><b>Move image</b><span>Fingers move and zoom the tracing image</span></button>
-                <button data-k="light"><b>Light on/off</b><span>Front light to full for tracing</span></button>
+                <button data-k="light"><b>Light full / back</b><span>Front light to full for tracing, tap again for your level</span></button>
                 <button data-k="mask"><b>Invert mask</b><span>Swaps black and white in the mask in use</span></button>
                 <button data-k="none"><b>Empty</b><span>Leaves a gap</span></button>
               </div>
@@ -319,8 +318,6 @@
         <div class="stack">
           <div class="pane">
             <div class="pane-title">Behaviour</div>
-            <div class="opt"><div class="tx"><div class="t1">Keep the notebook from reacting to the pen</div><div class="t2">Only matters when the tablet screen is off. Taps then go to Windows only.</div></div>
-              <label class="switch"><input type="checkbox" data-key="grab"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Keep running in the tray when the window is closed</div><div class="t2">The pen keeps working. Open or exit Paper Tablet from its tray icon.</div></div>
               <label class="switch"><input type="checkbox" data-key="close_to_tray"><span class="track"></span></label></div>
             <details class="disclose">
@@ -338,8 +335,6 @@
               <label class="switch"><input type="checkbox" data-key="auto_connect"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Turn on the pen</div></div>
               <label class="switch"><input type="checkbox" data-key="auto_output"><span class="track"></span></label></div>
-            <div class="opt"><div class="tx"><div class="t1">Show the tablet screen</div></div>
-              <label class="switch"><input type="checkbox" data-key="auto_screen"><span class="track"></span></label></div>
             <p class="hint mts">With these on, plugging in is all it takes. Unplug and the tablet goes straight back to your notebooks.</p>
           </div>
         </div>

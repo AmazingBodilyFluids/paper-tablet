@@ -92,6 +92,7 @@ def bare_engine(cfg=None):
     e.set_output = lambda on: e.settings.append(("output", on))
     e.companion = types.SimpleNamespace(running=True)
     e.cal = None
+    e.light_now, e.light_back = None, 85
     e.companion_rotation = lambda: 3
     return e
 
@@ -168,7 +169,7 @@ class Profiles(unittest.TestCase):
         e.worker = None
         e.companion = types.SimpleNamespace(running=True, lines=[])
         e.companion.send = e.companion.lines.append
-        e.companion.light = lambda on: None
+        e.companion.light = lambda pct=None: pct
         return e
 
     def test_old_layout_becomes_first_profile(self):
@@ -218,9 +219,29 @@ class PaperAndTrace(Profiles):
         e.tablet_action("trace 120.5 -40 2.5")
         self.assertEqual((e.cfg["trace_x"], e.cfg["trace_y"], e.cfg["trace_scale"]), (120.5, -40.0, 2.5))
         e.tablet_action("traceadjust")
-        e.tablet_action("light")
         self.assertTrue(e.cfg["trace_adjust"])
-        self.assertTrue(e.cfg["light"])
+
+    def test_light_bar_and_light_button(self):
+        e = self.engine()
+        e.tablet_action("lightset 60")  # the bar under the panel: the tablet set it already
+        self.assertEqual((e.cfg["light_level"], e.light_now), (60, 60))
+        self.assertNotIn("light 60", e.companion.lines)
+        e.tablet_action("light")        # a Light button: full ...
+        self.assertEqual(e.cfg["light_level"], 100)
+        self.assertIn("light 100", e.companion.lines)
+        e.tablet_action("light")        # ... and back to where it was
+        self.assertEqual(e.cfg["light_level"], 60)
+        e.set_light(250)
+        self.assertEqual(e.cfg["light_level"], 100)  # clamped
+
+    def test_screen_is_not_optional(self):
+        for gone in ("auto_screen", "grab", "light"):
+            self.assertNotIn(gone, core.DEFAULTS)
+        e = self.engine()
+        e.companion.running = False
+        self.assertFalse(e.want_grab())  # closed on the tablet: the notebooks get the pen
+        e.cal = {"mode": "sheet9", "taps": []}
+        self.assertTrue(e.want_grab())   # calibrating without the screen: keep taps off xochitl
 
     def test_values_are_clamped(self):
         e = self.engine()

@@ -355,3 +355,4 @@ ol.steps li .sub { color:var(--dim2); font-size:12px; margin-top:2px; }
 .opt .tx { min-width:0; }
 .t2.clip { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .legend span + span { margin-left:16px; }
+[hidden] { display:none !important; }

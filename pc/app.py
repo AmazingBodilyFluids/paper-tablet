@@ -128,8 +128,11 @@ class Api:
     def set_output(self, on):
         self._engine.set_output(on)
 
-    def set_screen(self, on):
-        self._engine.set_screen(on)
+    def restart_screen(self):
+        self._engine.restart_screen()
+
+    def set_light(self, pct):
+        self._engine.set_light(pct)
 
     def clear_ink(self):
         self._engine.companion.send("clear")

@@ -69,6 +69,7 @@ function status() {
     const bits = [];
     bits.push(S.output ? "The pen is drawing in Windows." : "The pen is connected but not sent to Windows yet.");
     if (S.screen) bits.push("Your strokes show on the tablet screen.");
+    else bits.push("The tablet screen was closed on the tablet, so your notebooks are showing.");
     return { dot: "ok", lbl: "Connected", title: S.output ? "Ready. Draw away." : "Connected", text: bits.join(" ") };
   }
   if (st.kind === "connecting") return { dot: "busy", lbl: "Connecting", title: "Connecting…", text: st.text };
@@ -102,18 +103,20 @@ function indicators(s) {
 
 // Home's banner: only while something needs doing, so a working setup leaves the picture alone.
 function banner(s) {
-  const ok = S.connected && S.calibration && !S.calibrating;
+  const ok = S.connected && S.calibration && !S.calibrating && S.screen;
   $("#banner").hidden = !!ok;
   if (ok) return;
   const uncal = S.connected && !S.calibrating && !S.calibration;
+  const closed = S.connected && !S.calibrating && !S.screen;
   $("#banDot").className = "dot " + (uncal ? "warn" : s.dot);
-  $("#banTitle").textContent = uncal ? "Not calibrated yet" : s.title;
-  $("#banText").textContent = uncal
-    ? "The cursor follows the desk position picked under Calibrate, using the whole tablet. Calibrate once for exact tracking." : s.text;
+  $("#banTitle").textContent = closed ? "Tablet screen closed" : uncal ? "Not calibrated yet" : s.title;
+  $("#banText").textContent = closed ? "The power button on the tablet handed it back to your notebooks. The pen still works in Windows."
+    : uncal ? "The cursor follows the desk position picked under Calibrate, using the whole tablet. Calibrate once for exact tracking." : s.text;
   const acts = $("#banActions");
   acts.innerHTML = "";
   if (!S.cfg.onboarded) acts.append(button("Open the setup guide", "acc", () => Wizard.open()));
   else if (!S.connected && S.ssh) acts.append(button("Connect", "acc", () => api().connect()));
+  else if (closed) acts.append(button("Show it again", "acc", () => { api().restart_screen(); toast("Starting the tablet screen…"); }));
   else if (uncal) acts.append(button("Calibrate now", "acc", () => Cal.open()));
   else if (S.calibrating) acts.append(button("Show calibration", "", () => Cal.open(2)));
   else if (S.status.kind === "error") acts.append(button("Try again", "", () => api().connect()));
@@ -132,8 +135,13 @@ function render() {
   $("#devMeta").textContent = S.device ? `${S.cfg.host} · kernel ${S.device.kernel}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
 
   setTbt("#tgOutput", S.output, S.connected, "Pen in Windows", "draw in Photoshop, Krita, anything");
-  setTbt("#tgScreen", S.screen, S.connected, "Tablet screen", "shows your strokes on the tablet as a fading trail"
-         + (S.screen ? " (the notebook app is paused meanwhile)" : ""));
+  // front light: the level in use, else the one saved for next time
+  const lv = S.light ?? S.cfg.light_level;
+  $("#lightRow").hidden = !S.model.frontlight;
+  if (document.activeElement !== $("#lightR")) {
+    $("#lightR").value = lv ?? 0; paintRange($("#lightR"));
+    $("#lightV").textContent = lv == null ? "yours" : lv ? lv + "%" : "off";
+  }
   setTbt("#tgSnap", !!S.cfg.snap, true, "Shapes", "draw a line, circle, rectangle or triangle and hold the pen still to snap it clean");
 
   if (Date.now() > themeHold) applyTheme(S.cfg.theme || "intaglio");
@@ -270,12 +278,12 @@ for (const seg of $$(".seg[data-key]")) {
     setKey(seg.dataset.key, b.dataset.v).then(refresh);
   });
 }
-function screenOn(on) {
-  api().set_screen(on);
-  toast(on ? "Starting the tablet screen…" : "Giving the screen back to the notebook app…");
-}
 $("#tgOutput").onclick = () => { S.output = !S.output; render(); api().set_output(S.output); };
-$("#tgScreen").onclick = () => screenOn(!S.screen);
+$("#lightR").addEventListener("input", e => {
+  paintRange(e.target);
+  $("#lightV").textContent = +e.target.value ? e.target.value + "%" : "off";
+});
+$("#lightR").addEventListener("change", e => { api().set_light(+e.target.value); e.target.blur(); });
 $("#tgSnap").onclick = () => setKey("snap", !S.cfg.snap).then(refresh);
 $("#btnConnect").onclick = () => api().connect();
 $("#btnDisconnect").onclick = () => api().disconnect();
@@ -1066,7 +1074,7 @@ const Panel = {
     if (b.kind === "snap") return S.cfg.snap ? "on" : "off";
     if (b.kind === "clear") return "tablet ink";
     if (b.kind === "trace") return S.cfg.trace_adjust ? "moving" : "image";
-    if (b.kind === "light") return S.cfg.light ? "on" : "off";
+    if (b.kind === "light") return S.light != null ? S.light + "%" : "";
     if (b.kind === "mask") return S.cfg.mask_invert ? "inverted" : "normal";
     return "";
   },
@@ -1077,7 +1085,7 @@ const Panel = {
     if (!this.btns || (!this.dirty && saved !== JSON.stringify(this.btns))) this.btns = JSON.parse(saved);
     if (view !== "panel") return;
     this.renderProfiles();
-    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.cfg.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_invert]);
+    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_invert]);
     if (sig !== this.sig) { this.sig = sig; this.draw(); }
     if (!this.recording && document.activeElement !== $("#peName") && document.activeElement !== $("#peKeys")) this.fill();
     this.renderTaps();
@@ -1595,7 +1603,7 @@ const Scr = {
     btns.forEach((b, i) => {
       if (!b || b.kind === "none") return;
       const on = (b.kind === "pen" && S.output) || (b.kind === "snap" && c.snap) || (b.kind === "trace" && c.trace_adjust)
-        || (b.kind === "light" && c.light) || (b.kind === "mask" && c.mask_invert);
+        || (b.kind === "light" && S.light >= 100) || (b.kind === "mask" && c.mask_invert);
       const x = (i % 2) * cw + 8, y = this.HEAD + Math.floor(i / 2) * ch + 8, bw = cw - 16, bh = ch - 16;
       this.box(ctx, x, y, bw, bh, 14, on ? "#000" : "#fff");
       const fg = on ? "#fff" : "#000", sub = Panel.sub(b);
@@ -1695,7 +1703,7 @@ const Scr = {
   },
 
   note(L) {
-    $("#scrNote").textContent = (S.screen ? "" : S.connected ? "The tablet screen is off; this is how it will look. " : "No tablet connected; this is how its screen will look. ")
+    $("#scrNote").textContent = (S.screen ? "" : S.connected ? "The tablet screen was closed on the tablet; this is how it will look. " : "No tablet connected; this is how its screen will look. ")
       + "Strokes aren't copied here. Click Finger gestures on the panel to preview that sheet.";
     const t = this.drag === "mask" ? "Mouse wheel zooms the mask" : S.cfg.trace_file ? "Mouse wheel zooms the image" : "No tracing image: choose one under Tracing image below";
     $("#scrHint").textContent = t;

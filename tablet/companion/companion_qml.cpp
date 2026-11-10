@@ -67,7 +67,9 @@ Window {
     property real traceY: 0
     property real traceOpacity: 0.5
     property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
-    property bool lightOn: false
+    property int lightPct: -1            // front light in percent; -1: unknown or no front light (bar hidden)
+    readonly property bool lightOn: lightPct >= 100
+    readonly property bool lightBar: lightPct >= 0
     property bool nativeTouch: false     // fingers go to Windows as real touch, no gestures here
     // pen mask: the PC keeps it and sends it as an image (black, alpha = how masked); it is made
     // and placed in the desktop app, and only switched and inverted here
@@ -139,7 +141,20 @@ Window {
     onAreaChanged: refreshScreen()
     onModeChanged: refreshScreen()
     onPenDownChanged: epMode()
-    readonly property real footH: 190
+    readonly property real footH: lightBar ? 270 : 190
+    // the light bar at the foot of the panel: tap or drag along it, left end = off
+    readonly property real lightY: view.height - 92
+    readonly property real lightH: 66
+    function lightHit(p) {
+        return lightBar && panelOpen && inPanel(p) && p.y >= lightY - 40 && p.y < lightY + lightH + 20
+    }
+    function lightAt(p) {
+        var f = (p.x - panelX - 16) / Math.max(1, panelW - 32)
+        var pct = Math.max(0, Math.min(10, Math.round(f * 10))) * 10
+        if (pct === lightPct) return
+        lightPct = pct
+        console.warn("LIGHT:" + pct)   // main.cpp sets the light itself and tells the PC
+    }
     readonly property int rows: 8
     readonly property real cellW: panelW / 2
     readonly property real cellH: (view.height - headH - footH) / rows
@@ -208,9 +223,9 @@ Window {
             for (var i = 0; i + 1 < a.length; i += 2) {
                 if (a[i] === "pen") penOut = a[i + 1] === "1"
                 else if (a[i] === "snap") snapOn = a[i + 1] === "1"
-                else if (a[i] === "light") lightOn = a[i + 1] === "1"
             }
-        } else if (c === "unlatch") latched = ({})
+        } else if (c === "light") lightPct = parseInt(a[0])
+        else if (c === "unlatch") latched = ({})
     }
 
     function clearInk() {
@@ -282,6 +297,7 @@ Window {
     function pressAt(p) {
         if (tabHit(p)) { fold(); return -2 }
         if (gestureBtnHit(p)) { gestureSheet = !gestureSheet; return -4 }
+        if (lightHit(p)) { lightAt(p); return -5 }
         var arrow = profileArrow(p)
         if (arrow) { latched = ({}); act("profile " + (arrow > 0 ? "next" : "prev")); return -3 }
         var i = buttonAt(p)
@@ -336,6 +352,7 @@ Window {
             // the panel takes the pen; the PC ignores the pen over the panel too
             endStroke()
             if (touching && penBtn === -1) { penBtn = pressAt(p); if (penBtn === -1) penBtn = 99 }
+            else if (touching && penBtn === -5 && lightHit(p)) lightAt(p)   // dragging along the light bar
             else if (!touching || !inPanel(p)) { if (penBtn >= 0 && penBtn !== 99) releaseBtn(penBtn, true); else pressing = -1; penBtn = -1 }
             return
         }
@@ -867,7 +884,7 @@ Window {
                             Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 18
                                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 12
                                    text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off")
-                                       : cell.b.kind === "light" ? (win.lightOn ? "on" : "off")
+                                       : cell.b.kind === "light" ? (win.lightBar ? win.lightPct + "%" : "")
                                        : cell.b.kind === "mask" ? (win.maskInvert ? "inverted" : "normal") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
                                    color: cell.on ? "white" : "black" }
                         }
@@ -886,6 +903,23 @@ Window {
                 x: 22; y: win.gesturesOn ? win.gBtnY + win.gBtnH + 20 : view.height - win.footH + 24
                 width: parent.width - 44; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
                 font.pixelSize: 19; color: "black"; text: "Power button: back to notebooks"
+            }
+            Item {  // front light: ten steps, black up to the level; the left end turns it off
+                visible: win.lightBar
+                x: 16; y: win.lightY - 34; width: parent.width - 32; height: win.lightH + 34
+                Text { x: 6; y: 0; font.pixelSize: 21; font.bold: true; color: "black"
+                       text: win.lightPct > 0 ? "Light " + win.lightPct + "%" : "Light off" }
+                Row {
+                    y: 34; height: win.lightH; spacing: 4
+                    Repeater {
+                        model: 10
+                        Rectangle {
+                            width: (parent.parent.width - 36) / 10; height: win.lightH; radius: 6
+                            border.width: 3; border.color: "black"
+                            color: (index + 1) * 10 <= win.lightPct ? "black" : "white"
+                        }
+                    }
+                }
             }
         }
 
@@ -962,6 +996,11 @@ Window {
                 win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i]
+                    if (win.touchBtn[t.pointId] === -5) {  // a finger sliding along the light bar
+                        var lp = Qt.point(t.x, t.y)
+                        if (win.lightHit(lp)) win.lightAt(lp)
+                        continue
+                    }
                     if (g[t.pointId] && win.palmCheck(t)) { palm = true; continue }
                     if (g[t.pointId]) { g[t.pointId] = {x: t.x, y: t.y}; moved = true }
                 }

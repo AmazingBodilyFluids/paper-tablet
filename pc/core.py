@@ -43,9 +43,9 @@ DEFAULTS = {
     # Wi-Fi login only goes to the tablet that was plugged in
     "wifi": False, "wifi_host": "", "host_key": "", "wifi_off_pending": False, "monitor": 0, "fit": "crop", "edge_lift": True,
     "orientation": "as-calibrated", "area": [0.0, 0.0, 1.0, 1.0], "gamma": 1.0, "threshold": 0.0,
-    "tilt": True, "grab": False, "feedback": "indirect", "companion_rot": "Match calibration",
+    "tilt": True, "feedback": "indirect", "companion_rot": "Match calibration",
     # plug-and-play
-    "auto_connect": True, "auto_output": True, "auto_screen": True, "trail_ms": 1500,
+    "auto_connect": True, "auto_output": True, "trail_ms": 1500,
     "onboarded": False,
     # window: colour theme (web/themes.css), and whether closing the window keeps the app in the tray
     "theme": "intaglio", "close_to_tray": True,
@@ -59,10 +59,13 @@ DEFAULTS = {
     "panel_buttons": None,  # filled from DEFAULT_BUTTONS below; always the active profile's buttons
     # named button sets, cycled with the arrows on the tablet panel: [{"name", "buttons"}]
     "panel_profiles": None, "panel_profile": 0,
-    # the tablet screen under the ink: paper pattern, a tracing image, the front light
+    # the tablet screen under the ink: paper pattern, a tracing image
     "paper": "plain", "paper_mm": 5.0,
     "trace_file": "", "trace_opacity": 0.5, "trace_scale": 1.0, "trace_x": 0.0, "trace_y": 0.0,
-    "trace_adjust": False, "light": False,
+    "trace_adjust": False,
+    # front light while the tablet screen runs, in percent; None leaves the tablet's own level.
+    # The tablet's level comes back when the screen hands back to the notebooks (run.sh).
+    "light_level": None,
     # pen mask (penmask.py, kept in its own file; "mask" is only the old hex form, carried over once):
     # black: the pen does nothing in Windows, grey: partly masked (mask_mode: "fade" scales the pressure
     # down, "gate" needs a firmer press). Made from an image and placed in the desktop app.
@@ -337,17 +340,23 @@ class Companion:
             self.trace_sent = key
         return remote
 
-    def light(self, on):
-        """Front light to full, or back to what it was when the screen was taken over
-        (run.sh saved that, and puts it back itself however the session ends)."""
+    def light(self, pct=None):
+        """Set the front light to pct percent (None: leave it) and return the level it is at now,
+        in percent, or None if it can't be read. run.sh saved the notebook level at the start and
+        puts it back itself however the session ends."""
         if not self.tab:
-            return
-        cmd = (f"cat {FRONTLIGHT}/max_brightness > {FRONTLIGHT}/brightness" if on else
-               f"[ -f /tmp/rmpp-companion.lock/light ] && cat /tmp/rmpp-companion.lock/light > {FRONTLIGHT}/brightness")
+            return None
+        cmd = ""
+        if pct is not None:
+            pct = max(0, min(100, int(pct)))
+            cmd = (f"m=$(cat {FRONTLIGHT}/max_brightness) && "
+                   f"echo $(( (m * {pct} + 50) / 100 )) > {FRONTLIGHT}/brightness; ")
         try:
-            self.tab.run(cmd)
+            _, out, _ = self.tab.run(cmd + f"cat {FRONTLIGHT}/brightness {FRONTLIGHT}/max_brightness")
+            now, top = (int(v) for v in out.split()[:2])
+            return round(100 * now / top) if top > 0 else None
         except Exception:
-            pass
+            return None
 
     @property
     def running(self):
@@ -389,8 +398,8 @@ class Companion:
         if "first frame drawn" in line:
             self.engine.refresh_mapper()  # the side panel now takes part of the tablet
             self.engine.sync_companion()
-            if self.engine.cfg.get("light") and self.engine.model.frontlight:
-                threading.Thread(target=self.light, args=(True,), daemon=True).start()
+            if self.engine.model.frontlight:
+                threading.Thread(target=self.engine.apply_light, daemon=True).start()
             self.engine.changed()
         if line == "companion: closed":
             self.engine.mouse.end()
@@ -579,6 +588,8 @@ class Engine:
         self.info = self.pen = None
         self.set_model(devices.MODELS.get(self.cfg.get("model"), devices.DEFAULT))
         self.worker = None
+        self.light_now = None   # front light in percent while the tablet screen runs, once known
+        self.light_back = 85    # where a Light panel button goes back to from full
         self.companion = Companion(self)
         self.output_on = False
         self.cal = None  # {"mode", "taps"} while calibrating
@@ -643,7 +654,7 @@ class Engine:
         return {
             "cfg": self.cfg, "touch_mode": self.touch_mode(), "status": {"kind": self.status[0], "text": self.status[1]},
             "link": self.link, "ssh": self.ssh_port, "connected": self.connected, "via": self.via,
-            "output": self.output_on, "screen": self.companion.running,
+            "output": self.output_on, "screen": self.companion.running, "light": self.light_now,
             "device": self.pen and {"name": self.pen["name"], "kernel": self.info.get("release", ""),
                                     "tilt": "TILT_X" in self.pen["abs"]},
             "model": {"key": self.model.key, "name": self.model.name, "verified": self.model.verified,
@@ -747,15 +758,12 @@ class Engine:
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
                    "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
                    "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
-                   "trace_adjust", "light", "mask_on", "mask_invert", "mask_panel", "mask_strip_open",
+                   "trace_adjust", "mask_on", "mask_invert", "mask_panel", "mask_strip_open",
                    "taps"):
             self.sync_companion()
         if key in ("mask_contrast", "mask_invert"):
             self.push_mask()
             self.push_strip()
-        if key == "light" and self.companion.running and self.model.frontlight:
-            threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
-            self.companion.send("toast Front light: " + ("full" if val else "back to your level"))
         if key == "panel_profile" and self.companion.running:
             self.companion.send("unlatch")
         if key == "tilt" and self.worker and self.worker.translator and self.pen:
@@ -1152,8 +1160,13 @@ class Engine:
         elif name == "light":
             if not self.model.frontlight:
                 self.companion.send(f"toast The {self.model.name} has no front light")
-            else:
-                self.set("light", not self.cfg.get("light"))
+            else:  # a Light panel button: full, then back to the level before
+                now = self.light_now if self.light_now is not None else self.cfg.get("light_level")
+                full = now is not None and now >= 100
+                self.set_light(self.light_back if full else 100)
+                self.companion.send(f"toast Front light {self.light_now}%")
+        elif name == "lightset" and arg.isdigit():  # the light bar under the panel
+            self.set_light(int(arg), from_tablet=True)
         elif name == "profile" and arg in ("next", "prev"):
             self.set("panel_profile", self.cfg["panel_profile"] + (1 if arg == "next" else -1))
         elif name == "pen":
@@ -1381,7 +1394,7 @@ class Engine:
             threading.Thread(target=self.cable_chores, args=(self.worker.tab,), daemon=True).start()
         if self.cfg["auto_output"]:
             self.output_on = True
-        if self.cfg["auto_screen"] and self.worker:
+        if self.worker:  # the tablet screen is part of the app, not an option
             try:
                 self.companion.start(self.worker.tab)
             except Exception as ex:
@@ -1480,12 +1493,11 @@ class Engine:
         self.changed()
 
     def want_grab(self):
-        """Grab the pen away from xochitl when asked to, and always while calibrating (so taps
-        don't open its menus), but never while the tablet screen runs: xochitl is stopped then,
-        and a grab would starve the screen's own pen reader."""
-        if self.companion.running:
-            return False
-        return bool(self.cfg["grab"]) or self.cal is not None
+        """Grab the pen away from xochitl only while calibrating without the tablet screen (so
+        taps don't open its menus). Never while the screen runs: xochitl is stopped then, and a
+        grab would starve the screen's own pen reader. With the screen closed from the tablet
+        (power button), the notebooks are meant to work, so the pen is left to them."""
+        return self.cal is not None and not self.companion.running
 
     def make_pen(self):
         if sys.platform != "win32":
@@ -1504,12 +1516,35 @@ class Engine:
 
     # ------------------------------------------------------------------ tablet screen
 
-    def set_screen(self, on):
-        if on:
-            if self.worker and self.worker.tab:
-                self.companion.start(self.worker.tab)
-        else:
-            self.companion.stop()
+    def restart_screen(self):
+        """Bring the tablet screen back after it was closed on the tablet (power button) or
+        didn't start; it always starts by itself on connecting."""
+        if self.worker and self.worker.tab:
+            self.companion.start(self.worker.tab)
+        self.changed()
+
+    # ------------------------------------------------------------------ front light
+
+    def apply_light(self):
+        """On screen start: set the saved level, or read the tablet's own one."""
+        lvl = self.companion.light(self.cfg.get("light_level"))
+        self.light_now = lvl
+        if lvl is not None:
+            self.companion.send(f"light {lvl}")
+        self.changed()
+
+    def set_light(self, pct, from_tablet=False):
+        """Front light in percent. From the tablet, the screen app already set it itself."""
+        pct = max(0, min(100, int(round(float(pct)))))
+        if pct < 100:
+            self.light_back = pct
+        with self.lock:
+            self.cfg["light_level"] = pct
+            self.save()
+        self.light_now = pct
+        if not from_tablet and self.companion.running and self.model.frontlight:
+            self.companion.send(f"light {pct}")
+            threading.Thread(target=self.companion.light, args=(pct,), daemon=True).start()
         self.changed()
 
     def position(self):
@@ -1572,7 +1607,9 @@ class Engine:
         c.send(f"profile {self.cfg['panel_profile']} {len(profs)} {profs[self.cfg['panel_profile']]['name']}")
         c.send("area " + " ".join(f"{a:.4f}" for a in self.effective_area()))
         c.send(f"fade {int(self.cfg['trail_ms'])}")
-        c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))} light {int(bool(self.cfg.get('light')))}")
+        c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))}")
+        if self.model.frontlight and self.light_now is not None:
+            c.send(f"light {self.light_now}")
         c.send(f"paper {self.cfg.get('paper', 'plain')} {float(self.cfg.get('paper_mm', 5)) * self.model.px_per_mm:.1f}")
         try:
             remote = c.trace_remote(self.cfg.get("trace_file"))
