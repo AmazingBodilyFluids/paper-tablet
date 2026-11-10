@@ -135,6 +135,10 @@ function render() {
   $("#devMeta").textContent = S.device ? `${S.cfg.host} · kernel ${S.device.kernel}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
 
   setTbt("#tgOutput", S.output, S.connected, "Pen in Windows", "draw in Photoshop, Krita, anything");
+  for (const seg of $$(".maskSide")) {
+    const v = S.cfg.mask_panel === false ? "off" : S.cfg.mask_side || "right";
+    for (const b of $$("button", seg)) b.classList.toggle("on", b.dataset.v === v);
+  }
   // front light: the level in use, else the one saved for next time
   const lv = S.light ?? S.cfg.light_level;
   $("#lightRow").hidden = !S.model.frontlight;
@@ -279,6 +283,15 @@ for (const seg of $$(".seg[data-key]")) {
   });
 }
 $("#tgOutput").onclick = () => { S.output = !S.output; render(); api().set_output(S.output); };
+for (const seg of $$(".maskSide")) {  // the mask strip's side, or off (mask_side + mask_panel)
+  seg.addEventListener("click", async e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.v === "off") await setKey("mask_panel", false);
+    else { await setKey("mask_side", b.dataset.v); await setKey("mask_panel", true); }
+    refresh();
+  });
+}
 $("#lightR").addEventListener("input", e => {
   paintRange(e.target);
   $("#lightV").textContent = +e.target.value ? e.target.value + "%" : "off";
@@ -1037,14 +1050,42 @@ $("#wzSkip").onclick = () => Wizard.close();
 
 // ------------------------------------------------------------------ panel buttons editor
 
+// The tablet panel's foot is taller when it carries the front-light bar (companion_qml.cpp footH).
+const lightShown = () => !!(S && S.model && S.model.frontlight);
+const foot = () => lightShown() ? 300 : 190;
+// the light bar as the tablet draws it: "Light N%" over ten steps, black up to the level
+function lightBar(ctx, x, y, w, F) {
+  const lv = S.light ?? S.cfg.light_level, pct = lv == null ? -1 : lv;
+  ctx.fillStyle = "#000"; ctx.font = `bold 21px ${F}`; ctx.textBaseline = "top";
+  ctx.fillText(pct > 0 ? `Light ${pct}%` : pct === 0 ? "Light off" : "Light", x + 6, y - 34);
+  ctx.textBaseline = "alphabetic";
+  const cw = (w - 36) / 10;
+  for (let i = 0; i < 10; i++) {
+    const cx = x + i * (cw + 4);
+    ctx.fillStyle = (i + 1) * 10 <= pct ? "#000" : "#fff";
+    roundRect(ctx, cx + 1.5, y + 1.5, cw - 3, 63, 6); ctx.fill();
+    ctx.strokeStyle = "#000"; ctx.lineWidth = 3; ctx.stroke();
+  }
+}
+
 // The panel mock-up is drawn from the tablet's own numbers (core.PANEL_PX, TAB_PX and the
 // companion's header/footer/rows), scaled down, so what you see is what the tablet shows.
 const Panel = {
   sel: 0,
-  btns: null,       // working copy of cfg.panel_buttons
+  btns: null,       // working copy of the side's buttons (cfg.panel_buttons / panel_buttons_right)
+  side: "left",     // which panel the editor shows
+  key() { return this.side === "right" ? "panel_buttons_right" : "panel_buttons"; },
+  defaults() { return this.side === "right" ? S.default_buttons_right : S.default_buttons; },
+  async setSide(side) {
+    if (side === this.side) return;
+    await this.flush();
+    this.side = side; this.btns = null; this.sel = 0; this.sig = "";
+    for (const b of $$("#pmSide button")) b.classList.toggle("on", b.dataset.v === side);
+    this.render(); this.fill(true);
+  },
   sig: "",          // what the mock-up was last drawn from
   recording: false,
-  HEAD: 230, FOOT: 190, ROWS: 8,
+  HEAD: 230, ROWS: 8,
 
   PRESETS: [
     ["Undo", "shortcut", "ctrl+z"], ["Redo", "shortcut", "ctrl+shift+z"], ["Save", "shortcut", "ctrl+s"],
@@ -1080,12 +1121,12 @@ const Panel = {
   },
 
   render() {
-    if (!S || !S.cfg.panel_buttons) return;
-    const saved = JSON.stringify(S.cfg.panel_buttons);
+    if (!S || !S.cfg[this.key()]) return;
+    const saved = JSON.stringify(S.cfg[this.key()]);
     if (!this.btns || (!this.dirty && saved !== JSON.stringify(this.btns))) this.btns = JSON.parse(saved);
     if (view !== "panel") return;
     this.renderProfiles();
-    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, S.cfg.panel, S.cfg.panel_open, S.cfg.gestures, S.output, S.cfg.snap, S.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_invert]);
+    const sig = JSON.stringify([this.btns, this.sel, S.cfg.panel_profiles, S.cfg.panel_profile, S.view, this.side, S.cfg.panel, S.cfg.panel_open, S.cfg.panel_open_right, S.cfg.gestures, S.output, S.cfg.snap, S.light, S.cfg.trace_adjust, S.cfg.mask_on, S.cfg.mask_invert]);
     if (sig !== this.sig) { this.sig = sig; this.draw(); }
     if (!this.recording && document.activeElement !== $("#peName") && document.activeElement !== $("#peKeys")) this.fill();
     this.renderTaps();
@@ -1157,7 +1198,7 @@ const Panel = {
   async flush() {  // a pending button edit belongs to the profile it was made in
     if (!this.t) return;
     clearTimeout(this.t); this.t = null;
-    if (this.dirty) { await setKey("panel_buttons", this.btns); this.dirty = false; }
+    if (this.dirty) { await setKey(this.key(), this.btns); this.dirty = false; }
   },
   async setProfiles(profs, cur) {
     await this.flush();
@@ -1187,15 +1228,15 @@ const Panel = {
       p[S.cfg.panel_profile].name = name;
       this.setProfiles(p);
     };
-    const add = (name, buttons) => {
+    const add = (name, buttons, right) => {
       const p = profs();
-      p.push({ name, buttons: copy(buttons) });
+      p.push({ name, buttons: copy(buttons), buttons_right: copy(right) });
       this.setProfiles(p, p.length - 1).then(() => { $("#profName").focus(); $("#profName").select(); });
     };
-    $("#profNew").onclick = async () => { await this.flush(); add(`Profile ${S.cfg.panel_profiles.length + 1}`, S.default_buttons); };
+    $("#profNew").onclick = async () => { await this.flush(); add(`Profile ${S.cfg.panel_profiles.length + 1}`, S.default_buttons, S.default_buttons_right); };
     $("#profDup").onclick = async () => {
       await this.flush();
-      add(S.cfg.panel_profiles[S.cfg.panel_profile].name + " copy", this.btns || S.cfg.panel_buttons);
+      add(S.cfg.panel_profiles[S.cfg.panel_profile].name + " copy", S.cfg.panel_buttons, S.cfg.panel_buttons_right);
     };
     let armed = 0;
     $("#profDel").onclick = () => {  // two clicks, so a stray one can't lose a layout
@@ -1208,12 +1249,21 @@ const Panel = {
     };
   },
 
+  lightRow(px, W, vh) {  // the front-light bar at the foot of the panel, as the tablet draws it
+    const lv = S.light ?? S.cfg.light_level, pct = lv == null ? -1 : lv, cw = (W - 32 - 36) / 10;
+    let cells = "";
+    for (let i = 0; i < 10; i++) cells += `<i style="left:${px(16 + i * (cw + 4))};top:${px(vh - 92)};width:${px(cw)};height:${px(66)};border-width:${px(3)};border-radius:${px(6)};background:${(i + 1) * 10 <= pct ? "#000" : "#fff"}"></i>`;
+    return `<div class="pm-light" title="Tap or drag along it on the tablet to set the front light">
+      <b style="left:${px(22)};top:${px(vh - 126)};font-size:${px(21)}">${pct > 0 ? `Light ${pct}%` : pct === 0 ? "Light off" : "Light"}</b>${cells}</div>`;
+  },
+
   draw() {
-    const wrap = $("#pmWrap"), [vw, vh] = S.view, right = S.cfg.panel === "right";
+    const wrap = $("#pmWrap"), [vw, vh] = S.view, right = this.side === "right";
+    const P = S.cfg.panel, here = P === this.side || P === "both", main = this.side === (P === "right" ? "right" : "left");
     const W = S.panel_px, T = S.tab_px, k = Math.min(640 / vh, 380 / (W + 260));
     const px = v => (v * k).toFixed(1) + "px";
-    const cw = W / 2, ch = (vh - this.HEAD - this.FOOT) / this.ROWS;
-    const open = S.cfg.panel_open !== false;
+    const FOOT = foot(), cw = W / 2, ch = (vh - this.HEAD - FOOT) / this.ROWS;
+    const open = (right ? S.cfg.panel_open_right : S.cfg.panel_open) !== false;
     // like the tablet's Text.HorizontalFit: shrink long text to the button, down to a minimum
     const fit = (t, size, min, em) => Math.max(min, Math.min(size, (cw - 28) / (Math.max(1, String(t).length) * em)));
     let cells = "";
@@ -1232,17 +1282,18 @@ const Panel = {
         <div class="pm-head" style="left:${px(right ? 22 : T + 14)};top:${px(24)};font-size:${px(22)};letter-spacing:${px(4)}">PAPER<br>TABLET</div>
         ${this.profRow(px, W, T)}
         ${cells}
-        ${S.cfg.gestures !== false ? `<div class="pm-gbtn" title="On the tablet this opens a list of the finger gestures; see Tap gestures here"
-          style="left:${px(16)};top:${px(vh - this.FOOT + 24)};width:${px(W - 32)};height:${px(72)};border-radius:${px(14)};border-width:${px(3)};font-size:${px(24)}">Finger gestures</div>` : ""}
-        <div class="pm-foot" style="left:${px(22)};top:${px(vh - this.FOOT + (S.cfg.gestures !== false ? 116 : 24))};width:${px(W - 44)};font-size:${px(19)}">Power button: back to notebooks</div>
+        ${main && S.cfg.gestures !== false ? `<div class="pm-gbtn" title="On the tablet this opens a list of the finger gestures; see Tap gestures here"
+          style="left:${px(16)};top:${px(vh - FOOT + 24)};width:${px(W - 32)};height:${px(72)};border-radius:${px(14)};border-width:${px(3)};font-size:${px(24)}">Finger gestures</div>` : ""}
+        ${main ? `<div class="pm-foot" style="left:${px(22)};top:${px(vh - FOOT + (S.cfg.gestures !== false ? 116 : 24))};width:${px(W - 44)};font-size:${px(19)}">Power button: back to notebooks</div>` : ""}
+        ${main && lightShown() ? this.lightRow(px, W, vh) : ""}
       </div>`;
     const tab = `<div class="pm-tab" title="Folds the panel away" style="${right ? "right:0" : "left:0"};width:${px(T)};height:${px(T)};border-width:${px(3)}">${chev}</div>`;
     const sw = W + 260;
     wrap.innerHTML = `<div class="pm-bezel"><div class="pm-screen${right ? " right" : ""}" style="width:${px(sw)};height:${px(vh)}">
-        ${open && S.cfg.panel !== "off" ? panel : ""}${S.cfg.panel !== "off" ? tab : ""}
+        ${open && here ? panel : ""}${here ? tab : ""}
         <div class="pm-ink" style="${right ? "right" : "left"}:${px(open ? W + 60 : 120)};top:${px(vh * 0.32)}"></div>
       </div></div>`;
-    $("#pmNote").textContent = S.cfg.panel === "off" ? "The panel is switched off (Side: Off)." :
+    $("#pmNote").textContent = !here ? `The ${this.side} panel is switched off (Panels: ${P === "off" ? "Off" : P === "left" ? "Left" : "Right"}). You can still set its buttons.` :
       open ? `${vw} × ${vh} tablet pixels; the panel is ${W} wide.` : "Folded: only the tab shows. Unfold to edit, or tap the tab on the tablet.";
     for (const c of $$(".pm-cell", wrap)) {
       c.onclick = () => { this.sel = +c.dataset.i; this.render(); this.fill(true); };
@@ -1260,7 +1311,7 @@ const Panel = {
       };
     }
     const t = $(".pm-tab", wrap);
-    if (t) t.onclick = () => setKey("panel_open", !open).then(refresh);
+    if (t) t.onclick = () => setKey(right ? "panel_open_right" : "panel_open", !open).then(refresh);
   },
 
   fill(force) {
@@ -1282,7 +1333,7 @@ const Panel = {
     this.render();
     clearTimeout(this.t);
     this.t = setTimeout(async () => {
-      await setKey("panel_buttons", this.btns);
+      await setKey(this.key(), this.btns);
       this.dirty = false;
       refresh();
     }, 250);
@@ -1383,10 +1434,11 @@ const Panel = {
     window.addEventListener("keydown", e => this.onKey(e), true);
     window.addEventListener("keyup", e => this.onKey(e), true);
     this.initProfiles();
+    for (const b of $$("#pmSide button")) b.onclick = () => this.setSide(b.dataset.v);
     $("#pmReset").onclick = () => {
-      this.btns = JSON.parse(JSON.stringify(S.default_buttons));
+      this.btns = JSON.parse(JSON.stringify(this.defaults()));
       this.save();
-      toast("Panel buttons back to the defaults.");
+      toast(`${this.side === "right" ? "Right" : "Left"} panel buttons back to the defaults.`);
     };
   },
 };
@@ -1399,25 +1451,32 @@ Panel.init();
 // image, mask, active area, mask strip and side panel. It doesn't copy your strokes, and it shows
 // the page as set even with no tablet connected. Drag the tracing image or the mask to place it.
 const Scr = {
-  HEAD: 230, FOOT: 190, ROWS: 8, PROF_Y: 94, PROF_H: 72,
+  HEAD: 230, ROWS: 8, PROF_Y: 94, PROF_H: 72,
   img: null, imgKey: null, thumbs: {}, thumbSig: null,
   drag: "trace", live: null,  // live = {x, y, s}: the tracing image while it is dragged or zoomed
   sheet: false,               // showing the gestures sheet (click Finger gestures in the picture)
   F: '"Noto Sans", "Segoe UI", system-ui, sans-serif',
 
-  layout() {
-    const [VW, VH] = S.view, c = S.cfg, right = c.panel === "right", cal = !!S.calibrating;
-    const panelOn = !cal && c.panel !== "off", panelW = panelOn && c.panel_open !== false ? S.panel_px : 0;
-    const stripSide = right ? "left" : "right", stripAvail = !cal && c.mask_panel !== false && (c.masks || []).length > 0;
+  layout() {  // as companion_qml.cpp: a panel on either side or both, the strip inside the one on its side
+    const [VW, VH] = S.view, c = S.cfg, cal = !!S.calibrating, P = S.panel_px, T = S.tab_px;
+    const onL = !cal && (c.panel === "left" || c.panel === "both"), onR = !cal && (c.panel === "right" || c.panel === "both");
+    const openL = c.panel_open !== false, openR = c.panel_open_right !== false;
+    const wL = onL && openL ? P : 0, wR = onR && openR ? P : 0;
+    const stripSide = c.mask_side === "left" ? "left" : "right";
+    const stripAvail = !cal && c.mask_panel !== false && (c.masks || []).length > 0;
     const stripW = stripAvail && c.mask_strip_open ? S.strip_px : 0;
-    return { VW, VH, T: S.tab_px, cal, right, panelOn, panelW, panelX: right ? VW - panelW : 0, stripSide, stripAvail, stripW,
-             stripX: stripSide === "right" ? VW - stripW : 0, paperX: (right ? 0 : panelW) + (stripSide === "left" ? stripW : 0),
-             paperW: VW - panelW - stripW };
+    const stripOff = stripSide === "left" ? (onL ? (openL ? P : T) : 0) : (onR ? (openR ? P : T) : 0);
+    const resL = stripSide === "left" && stripW ? stripOff + stripW : wL;
+    const resR = stripSide === "right" && stripW ? stripOff + stripW : wR;
+    return { VW, VH, T, P, cal, onL, onR, openL, openR, wL, wR, panelOn: onL || onR,
+             main: onL ? "left" : onR ? "right" : "", stripSide, stripAvail, stripW, stripOff,
+             stripX: stripSide === "right" ? VW - stripOff - stripW : stripOff,
+             stripTabX: stripSide === "right" ? VW - stripOff - T : stripOff,
+             resL, resR, paperX: resL, paperW: VW - resL - resR };
   },
-  area(L) {  // core.effective_area: the panel and the open strip keep the pen out
-    const a = [...S.cfg.area], f = L.panelW / L.VW, g = L.stripW / L.VW;
-    if (f && L.right) a[2] = Math.min(a[2], 1 - f); else if (f) a[0] = Math.max(a[0], f);
-    if (g && L.stripSide === "right") a[2] = Math.min(a[2], 1 - g); else if (g) a[0] = Math.max(a[0], g);
+  area(L) {  // core.effective_area: the panels and the open strip keep the pen out
+    const a = [...S.cfg.area];
+    a[0] = Math.max(a[0], L.resL / L.VW); a[2] = Math.min(a[2], 1 - L.resR / L.VW);
     return a[2] - a[0] < 0.1 ? [...S.cfg.area] : a;
   },
   trace() {
@@ -1510,9 +1569,12 @@ const Scr = {
     ctx.strokeRect(a[0] * L.VW + 1, a[1] * L.VH + 1, (a[2] - a[0]) * L.VW - 2, (a[3] - a[1]) * L.VH - 2);
     if (this.sheet) this.gestureSheet(ctx, L);
     if (L.stripW) this.strip(ctx, L);
-    if (L.panelOn && L.panelW) this.panel(ctx, L);
+    for (const side of ["left", "right"]) {
+      if (side === "left" ? L.wL : L.wR) this.panel(ctx, L, side);
+    }
     if (L.stripAvail) this.stripTab(ctx, L);
-    if (L.panelOn) this.foldTab(ctx, L);
+    if (L.onL) this.foldTab(ctx, L, "left");
+    if (L.onR) this.foldTab(ctx, L, "right");
     if (!L.panelOn) {
       ctx.fillStyle = "#000"; ctx.font = `26px ${this.F}`; ctx.textBaseline = "top";
       ctx.fillText("Connected to PC    (power button: back to notebooks)", 30 + L.paperX, 20);
@@ -1579,10 +1641,10 @@ const Scr = {
     ctx.closePath(); ctx.fill();
   },
 
-  panel(ctx, L) {
-    const c = S.cfg, W = L.panelW, VH = L.VH, T = L.T, right = L.right;
+  panel(ctx, L, side) {
+    const c = S.cfg, W = L.P, VH = L.VH, T = L.T, right = side === "right", main = side === L.main;
     ctx.save();
-    ctx.translate(L.panelX, 0);
+    ctx.translate(right ? L.VW - W : 0, 0);
     ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, VH);
     ctx.fillStyle = "#000"; ctx.fillRect(right ? 0 : W - 3, 0, 3, VH);
     ctx.font = `bold 22px ${this.F}`; ctx.letterSpacing = "4px"; ctx.textBaseline = "top";
@@ -1599,7 +1661,7 @@ const Scr = {
       this.triangle(ctx, W - 16 - 16 - 11, this.PROF_Y + this.PROF_H / 2, 22, 30, false);
     }
     // buttons
-    const btns = c.panel_buttons || [], cw = W / 2, ch = (VH - this.HEAD - this.FOOT) / this.ROWS;
+    const btns = (right ? c.panel_buttons_right : c.panel_buttons) || [], cw = W / 2, ch = (VH - this.HEAD - foot()) / this.ROWS;
     btns.forEach((b, i) => {
       if (!b || b.kind === "none") return;
       const on = (b.kind === "pen" && S.output) || (b.kind === "snap" && c.snap) || (b.kind === "trace" && c.trace_adjust)
@@ -1610,17 +1672,20 @@ const Scr = {
       this.text(ctx, b.t, x + bw / 2, y + bh / 2 - (sub ? 13 : 0), bw - 12, 28, 16, true, fg);
       if (sub) this.text(ctx, sub, x + bw / 2, y + bh / 2 + 17, bw - 12, 18, 12, false, fg);
     });
-    // foot: the gestures button, and how to leave
-    const gy = VH - this.FOOT + 24;
-    if (c.gestures !== false) {
-      this.box(ctx, 16, gy, W - 32, 72, 14, this.sheet ? "#000" : "#fff");
-      this.text(ctx, "Finger gestures", W / 2, gy + 36, W - 52, 24, 14, true, this.sheet ? "#fff" : "#000");
+    // foot of the main panel: the gestures button, how to leave, and the light bar
+    if (main) {
+      const gy = VH - foot() + 24;
+      if (c.gestures !== false) {
+        this.box(ctx, 16, gy, W - 32, 72, 14, this.sheet ? "#000" : "#fff");
+        this.text(ctx, "Finger gestures", W / 2, gy + 36, W - 52, 24, 14, true, this.sheet ? "#fff" : "#000");
+      }
+      this.wrap(ctx, "Power button: back to notebooks", W / 2, c.gestures !== false ? gy + 72 + 20 : gy, W - 44, 19);
+      if (lightShown()) lightBar(ctx, 16, VH - 92, W - 32, this.F);
     }
-    this.wrap(ctx, "Power button: back to notebooks", W / 2, c.gestures !== false ? gy + 72 + 20 : gy, W - 44, 19);
     ctx.restore();
   },
   gestureBtn(L) {  // where "Finger gestures" sits, in view pixels
-    return { x: L.panelX + 16, y: L.VH - this.FOOT + 24, w: L.panelW - 32, h: 72 };
+    return { x: (L.main === "right" ? L.VW - L.P : 0) + 16, y: L.VH - foot() + 24, w: L.P - 32, h: 72 };
   },
 
   gestureSheet(ctx, L) {
@@ -1671,19 +1736,19 @@ const Scr = {
     ctx.restore();
   },
   stripTab(ctx, L) {  // a half-shaded square in the corner away from the panel
-    const T = L.T, x = L.stripSide === "right" ? L.VW - T : 0, open = !!S.cfg.mask_strip_open;
+    const T = L.T, x = L.stripTabX, open = !!S.cfg.mask_strip_open;
     ctx.fillStyle = open ? "#000" : "#fff"; ctx.fillRect(x, 0, T, T);
     ctx.strokeStyle = "#000"; ctx.lineWidth = 3; ctx.strokeRect(x + 1.5, 1.5, T - 3, T - 3);
     const fg = open ? "#fff" : "#000", q = x + (T - 38) / 2, r = (T - 38) / 2;
     ctx.strokeStyle = fg; ctx.strokeRect(q + 1.5, r + 1.5, 35, 35);
     ctx.fillStyle = fg; ctx.fillRect(q + 3, r + 3, 16, 32);
   },
-  foldTab(ctx, L) {  // a solid triangle pointing the way the panel will move
-    const T = L.T, x = L.right ? L.VW - T : 0, open = S.cfg.panel_open !== false;
+  foldTab(ctx, L, side) {  // a solid triangle pointing the way the panel will move
+    const right = side === "right", T = L.T, x = right ? L.VW - T : 0, open = right ? L.openR : L.openL;
     ctx.fillStyle = "#fff"; ctx.fillRect(x, 0, T, T);
     ctx.strokeStyle = "#000"; ctx.lineWidth = 3; ctx.strokeRect(x + 1.5, 1.5, T - 3, T - 3);
     ctx.fillStyle = "#000";
-    this.triangle(ctx, x + T / 2, T / 2, 26, 36, L.right !== open);
+    this.triangle(ctx, x + T / 2, T / 2, 26, 36, right !== open);
   },
 
   targets(ctx, L) {  // calibrating: 9 crosshairs, 10% in, the next one ringed
@@ -1719,7 +1784,7 @@ const Scr = {
     let start = null, t0 = null, m0 = null, wheelT = 0;
     const onPaper = ([x, y]) => this.L && x >= this.L.paperX && x < this.L.paperX + this.L.paperW && y >= 0 && y < this.L.VH;
     const onBtn = ([x, y]) => {
-      if (!this.L || !this.L.panelOn || !this.L.panelW || S.cfg.gestures === false) return false;
+      if (!this.L || !this.L.main || !(this.L.main === "left" ? this.L.wL : this.L.wR) || S.cfg.gestures === false) return false;
       const b = this.gestureBtn(this.L);
       return x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
     };

@@ -51,12 +51,13 @@ DEFAULTS = {
     "theme": "intaglio", "close_to_tray": True,
     # hold-to-snap shapes
     "snap": True, "snap_hold_ms": 600, "snap_apps": ", ".join(shapes.DRAWING_APPS),
-    # tablet-screen side panel with shortcut buttons: left | right | off
-    "panel": "left", "panel_open": True, "gestures": True,
+    # tablet-screen side panels with shortcut buttons: left | right | both | off; each folds on its own
+    "panel": "left", "panel_open": True, "panel_open_right": True, "gestures": True,
     # touch contacts bigger than this are a palm; 0 = off. In Qt's units, about 0.75 x the panel's raw
     # TOUCH_MAJOR: measured fingertips 6-16 (raw 8-21), resting palm edge 19-49 (raw 25-63)
     "palm_size": 20,
     "panel_buttons": None,  # filled from DEFAULT_BUTTONS below; always the active profile's buttons
+    "panel_buttons_right": None,  # the same for the right-hand panel (DEFAULT_BUTTONS_RIGHT)
     # named button sets, cycled with the arrows on the tablet panel: [{"name", "buttons"}]
     "panel_profiles": None, "panel_profile": 0,
     # the tablet screen under the ink: paper pattern, a tracing image
@@ -76,6 +77,7 @@ DEFAULTS = {
     # active one is what the pen and the tablet use (mask_contrast / mask_mode / mask_invert mirror it),
     # and the tablet lists them in a strip on the side away from the shortcut panel
     "masks": None, "mask_active": "", "mask_panel": True,
+    "mask_side": "right",      # which side of the tablet the strip is on, inside a panel on that side
     "mask_strip_open": False,  # the strip folds away to a corner tab; picking a mask folds it again
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
@@ -100,6 +102,19 @@ DEFAULT_BUTTONS = [
 # a saved copy of that untouched layout moves to the new default.
 OLD_DEFAULT_BUTTONS = DEFAULT_BUTTONS[:-1] + [{"t": "Clear", "kind": "clear", "keys": ""}]
 DEFAULTS["panel_buttons"] = DEFAULT_BUTTONS
+# the right-hand panel: selections, layers and the screen extras, so the two panels don't repeat
+DEFAULT_BUTTONS_RIGHT = [
+    {"t": "Move", "kind": "shortcut", "keys": "v"}, {"t": "Lasso", "kind": "shortcut", "keys": "l"},
+    {"t": "Transform", "kind": "shortcut", "keys": "ctrl+t"}, {"t": "Deselect", "kind": "shortcut", "keys": "ctrl+d"},
+    {"t": "Select all", "kind": "shortcut", "keys": "ctrl+a"}, {"t": "Invert sel", "kind": "shortcut", "keys": "ctrl+shift+i"},
+    {"t": "New layer", "kind": "shortcut", "keys": "ctrl+shift+alt+n"}, {"t": "Merge down", "kind": "shortcut", "keys": "ctrl+e"},
+    {"t": "Copy", "kind": "shortcut", "keys": "ctrl+c"}, {"t": "Paste", "kind": "shortcut", "keys": "ctrl+v"},
+    {"t": "Swap col", "kind": "shortcut", "keys": "x"}, {"t": "Fill", "kind": "shortcut", "keys": "g"},
+    {"t": "Rotate", "kind": "hold", "keys": "r"}, {"t": "Reset col", "kind": "shortcut", "keys": "d"},
+    {"t": "Move image", "kind": "trace", "keys": ""}, {"t": "Light", "kind": "light", "keys": ""},
+]
+DEFAULTS["panel_buttons_right"] = DEFAULT_BUTTONS_RIGHT
+PANEL_SIDES = ("left", "right", "both", "off")
 # Tap gestures on the drawing area: "fingers x taps" -> title and keys ("" = nothing).
 # Ctrl+Shift+Alt+N is Photoshop's "new layer" without the dialog.
 TAP_SLOTS = {"1x2": "One finger, double tap", "1x3": "One finger, triple tap", "2x1": "Two-finger tap",
@@ -131,8 +146,10 @@ def clean_profiles(profiles, current=None):
         p = p if isinstance(p, dict) else {}
         name = " ".join(str(p.get("name") or "").split())[:24] or f"Profile {i + 1}"
         touch = p.get("touch") if p.get("touch") in TOUCH_MODES else "shortcuts"
-        out.append({"name": name, "buttons": clean_buttons(p.get("buttons")), "touch": touch})
-    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS), "touch": "shortcuts"}]
+        out.append({"name": name, "buttons": clean_buttons(p.get("buttons")),
+                    "buttons_right": clean_buttons(p.get("buttons_right") or DEFAULT_BUTTONS_RIGHT), "touch": touch})
+    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS),
+                    "buttons_right": clean_buttons(DEFAULT_BUTTONS_RIGHT), "touch": "shortcuts"}]
 
 
 def load_profiles(cfg):
@@ -140,6 +157,7 @@ def load_profiles(cfg):
     cfg["panel_profiles"] = clean_profiles(cfg.get("panel_profiles"), cfg.get("panel_buttons"))
     cfg["panel_profile"] = max(0, min(int(cfg.get("panel_profile") or 0), len(cfg["panel_profiles"]) - 1))
     cfg["panel_buttons"] = cfg["panel_profiles"][cfg["panel_profile"]]["buttons"]
+    cfg["panel_buttons_right"] = cfg["panel_profiles"][cfg["panel_profile"]]["buttons_right"]
 
 
 def clean_buttons(btns):
@@ -578,6 +596,8 @@ class Engine:
         if self.cfg.get("panel_buttons") == OLD_DEFAULT_BUTTONS:
             self.cfg["panel_buttons"] = DEFAULT_BUTTONS
         load_profiles(self.cfg)
+        if "mask_side" not in saved.get("gui", {}):  # it used to sit opposite the one panel
+            self.cfg["mask_side"] = "left" if self.cfg.get("panel") == "right" else "right"
         if self.cfg.get("palm_size") == 28:  # first guess, in raw units; Qt reports ~0.75 of that
             self.cfg["palm_size"] = 20
         self.calibration = saved.get("calibration")
@@ -669,6 +689,7 @@ class Engine:
             "snap_last": self.snap_last, "last_action": self.last_action, "held_keys": sorted(self.keys.held),
             "view": self.view_size(), "panel_px": PANEL_PX, "tab_px": TAB_PX,
             "key_names": sorted(keys.VK), "key_labels": keys.LABEL, "default_buttons": DEFAULT_BUTTONS,
+            "default_buttons_right": DEFAULT_BUTTONS_RIGHT,
             "pen_rate": self.rate.last, "mask_ver": self.pmask.ver, "mask_pct": round(100 * self.pmask.coverage()),
             "gesture_list": self.gesture_list(), "trace_key": self.trace_key(), "mask_vers": {k: m.ver for k, m in self.masks.items()},
             "strip_px": STRIP_PX, "strip_side": self.strip_side(), "strip_shown": bool(self.strip_frac()), "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
@@ -701,18 +722,20 @@ class Engine:
         with self.lock:
             if key not in DEFAULTS:
                 raise KeyError(key)
-            if key == "panel_buttons":
+            if key in ("panel_buttons", "panel_buttons_right"):
                 val = clean_buttons(val)
                 profs = [dict(p) for p in self.cfg["panel_profiles"]]
-                profs[self.cfg["panel_profile"]]["buttons"] = val
+                profs[self.cfg["panel_profile"]]["buttons" if key == "panel_buttons" else "buttons_right"] = val
                 self.cfg["panel_profiles"] = profs
             if key == "panel_profiles":
                 val = clean_profiles(val, self.cfg.get("panel_buttons"))
                 self.cfg["panel_profile"] = min(self.cfg["panel_profile"], len(val) - 1)
                 self.cfg["panel_buttons"] = val[self.cfg["panel_profile"]]["buttons"]
+                self.cfg["panel_buttons_right"] = val[self.cfg["panel_profile"]]["buttons_right"]
             if key == "panel_profile":
                 val = int(val) % len(self.cfg["panel_profiles"])
                 self.cfg["panel_buttons"] = self.cfg["panel_profiles"][val]["buttons"]
+                self.cfg["panel_buttons_right"] = self.cfg["panel_profiles"][val]["buttons_right"]
                 self.keys.release_all()  # a held key belongs to the old layout's buttons
             if key == "taps":
                 val = clean_taps(val)
@@ -723,6 +746,10 @@ class Engine:
                     val = DEFAULTS["rotate_keys"]
             if key == "swipe_step":
                 val = max(40, min(400, int(val)))
+            if key == "panel" and val not in PANEL_SIDES:
+                val = "left"
+            if key == "mask_side" and val not in ("left", "right"):
+                val = "right"
             if key == "paper" and val not in PAPERS:
                 val = "plain"
             if key == "paper_mm":
@@ -753,10 +780,10 @@ class Engine:
                 self.pmask.set_contrast(self.cfg["mask_contrast"], self.cfg["mask_invert"])
             self.refresh_mapper()
             self.save()
-        if key in ("companion_rot", "panel", "panel_open", "mask_panel", "mask_strip_open"):
+        if key in ("companion_rot", "panel", "panel_open", "panel_open_right", "mask_panel", "mask_strip_open", "mask_side"):
             self.refresh_mapper()
-        if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
-                   "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
+        if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open", "panel_open_right",
+                   "panel_buttons", "panel_buttons_right", "mask_side", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
                    "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
                    "trace_adjust", "mask_on", "mask_invert", "mask_panel", "mask_strip_open",
                    "taps"):
@@ -799,17 +826,24 @@ class Engine:
         w, h = self.model.screen
         return (h, w) if self.companion_rotation() % 2 else (w, h)
 
-    def panel_shown(self):
-        return (self.cfg.get("panel", "left") != "off" and self.companion.running and self.cal is None)
+    def panel_shown(self, side=None):
+        """Is a shortcut panel on this side (either side if None) of the tablet screen?"""
+        if not (self.companion.running and self.cal is None):
+            return False
+        p = self.cfg.get("panel", "left")
+        return p != "off" if side is None else p in (side, "both")
 
-    def panel_frac(self):
-        """Share of the tablet (across, as it sits) the open side panel takes, or 0."""
-        if not self.panel_shown() or not self.cfg.get("panel_open", True):
+    def panel_open(self, side):
+        return bool(self.cfg.get("panel_open" if side == "left" else "panel_open_right", True))
+
+    def panel_frac(self, side="left"):
+        """Share of the tablet (across, as it sits) the open panel on this side takes, or 0."""
+        if not self.panel_shown(side) or not self.panel_open(side):
             return 0.0
         return PANEL_PX / self.view_size()[0]
 
     def strip_side(self):
-        return "left" if self.cfg.get("panel") == "right" else "right"
+        return "left" if self.cfg.get("mask_side") == "left" else "right"
 
     def strip_avail(self):
         """Is the mask strip there at all (open, or folded to its corner tab)?"""
@@ -817,23 +851,30 @@ class Engine:
                     and self.cal is None)
 
     def strip_frac(self):
-        """Share of the tablet the open mask strip takes (opposite the panel), or 0."""
+        """Share of the tablet the open mask strip takes, or 0."""
         if not self.strip_avail() or not self.cfg.get("mask_strip_open"):
             return 0.0
         return STRIP_PX / self.view_size()[0]
 
+    def strip_offset(self):
+        """How far in from its edge the strip (and its corner tab) starts, in view pixels: past an
+        open panel on that side, or past a folded panel's tab."""
+        side = self.strip_side()
+        if not self.panel_shown(side):
+            return 0
+        return PANEL_PX if self.panel_open(side) else TAB_PX
+
+    def side_reserved(self, side):
+        """Share of the tablet on this side that the panel and strip keep from the pen."""
+        w = self.view_size()[0]
+        if self.strip_side() == side and self.strip_frac():
+            return (self.strip_offset() + STRIP_PX) / w
+        return self.panel_frac(side)
+
     def effective_area(self):
         a = list(self.cfg["area"])
-        f = self.panel_frac()
-        if f and self.cfg.get("panel") == "right":
-            a[2] = min(a[2], 1 - f)
-        elif f:
-            a[0] = max(a[0], f)
-        g = self.strip_frac()
-        if g and self.strip_side() == "right":
-            a[2] = min(a[2], 1 - g)
-        elif g:
-            a[0] = max(a[0], g)
+        a[0] = max(a[0], self.side_reserved("left"))
+        a[2] = min(a[2], 1 - self.side_reserved("right"))
         if a[2] - a[0] < 0.1:
             a = list(self.cfg["area"])
         return a
@@ -1033,31 +1074,30 @@ class Engine:
         return dataclasses.replace(s, pressure=int(round(lo + n * span)))
 
     def over_panel(self, s):
-        """Is the pen above the tablet's side panel or mask strip? Then it works those, not Windows."""
+        """Is the pen above a side panel, a fold tab or the mask strip? Then it works those, not Windows."""
         if not s.in_range or not self.mapper:
             return False
-        if self.strip_avail():
-            p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
-            g, right = self.strip_frac(), self.strip_side() == "right"
-            if g and ((p > 1 - g) if right else (p < g)):
-                return True
-            w, h = self.view_size()
-            if not g and q < TAB_PX / h and ((p > 1 - TAB_PX / w) if right else (p < TAB_PX / w)):
-                return True  # the folded strip's corner tab
-        if not self.panel_shown():
-            return False
         p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
-        right = self.cfg.get("panel") == "right"
-        f = self.panel_frac()
-        if f:
-            return p > 1 - f if right else p < f
-        # folded: only the small tab in the top corner is left
         w, h = self.view_size()
-        tx, ty = TAB_PX / w, TAB_PX / h
-        return q < ty and (p > 1 - tx if right else p < tx)
+        y = q * h
+        for side in ("left", "right"):
+            x = p * w if side == "left" else (1 - p) * w  # view pixels in from this side's edge
+            if self.panel_shown(side):
+                if x < (PANEL_PX if self.panel_open(side) else TAB_PX) and (self.panel_open(side) or y < TAB_PX):
+                    return True
+            if self.strip_avail() and self.strip_side() == side:
+                off = self.strip_offset()
+                if self.strip_frac():
+                    if off <= x < off + STRIP_PX:
+                        return True
+                elif off <= x < off + TAB_PX and y < TAB_PX:
+                    return True  # the folded strip's corner tab
+        return False
 
     def buttons(self):
-        return clean_buttons(self.cfg.get("panel_buttons") or DEFAULT_BUTTONS)
+        """Both panels' buttons as the tablet numbers them: 0-15 left, 16-31 right."""
+        return (clean_buttons(self.cfg.get("panel_buttons") or DEFAULT_BUTTONS)
+                + clean_buttons(self.cfg.get("panel_buttons_right") or DEFAULT_BUTTONS_RIGHT))
 
     def gesture_list(self):
         """The finger gestures as [gesture, what it does] rows: the tablet's gestures sheet and the
@@ -1136,8 +1176,9 @@ class Engine:
                 self.companion.send("toast " + (t["t"] or keys.label(t["keys"])))
         elif name in keys.SHORTCUTS:  # gestures
             self.keys.combo(keys.SHORTCUTS[name])
-        elif name == "panel":
-            self.set("panel_open", arg == "1")
+        elif name == "panel":  # a fold tab: "panel left|right 0|1" (older tablet apps: "panel 0|1")
+            side, flag = (arg, parts[2]) if len(parts) > 2 else ("left", arg)
+            self.set("panel_open" if side == "left" else "panel_open_right", flag == "1")
         elif name == "trace" and len(parts) == 4:  # the image was moved / zoomed on the tablet
             with self.lock:
                 self.cfg["trace_x"], self.cfg["trace_y"] = float(parts[1]), float(parts[2])
@@ -1598,7 +1639,7 @@ class Engine:
         c.send(f"rot {self.companion_rotation()}")
         shown = self.panel_shown()
         c.send(f"panel {self.cfg.get('panel', 'left') if shown else 'off'} {PANEL_PX / self.view_size()[0]:.4f}")
-        c.send(f"panelopen {int(bool(self.cfg.get('panel_open', True)))}")
+        c.send(f"panelopen {int(self.panel_open('left'))} {int(self.panel_open('right'))}")
         c.send(f"gestures {int(bool(self.cfg.get('gestures', True)))} {int(self.cfg.get('swipe_step', 100))} "
                f"{float(self.cfg.get('palm_size', 0))} {int(self.touch_mode() == 'windows')}")
         c.send("buttons " + json.dumps(self.companion_buttons(), separators=(",", ":")))

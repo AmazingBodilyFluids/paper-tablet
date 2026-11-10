@@ -158,6 +158,15 @@ class TabletActions(unittest.TestCase):
         e.tablet_action("snap 0")
         self.assertEqual(e.settings, [("panel_open", False), ("output", True), ("snap", False)])
 
+    def test_right_panel_buttons_and_fold(self):
+        e = bare_engine({"panel": "both", "panel_buttons_right": [{"t": "Copy", "kind": "shortcut", "keys": "ctrl+c"}]})
+        e.tablet_action("press 16")  # the right panel's first button
+        self.assertEqual([vk for vk, up in e.sent if not up], [0x11, 0x43])
+        e.tablet_action("panel right 0")
+        e.tablet_action("panel left 1")
+        self.assertEqual(e.settings, [("panel_open_right", False), ("panel_open", True)])
+        self.assertEqual(len(e.companion_buttons()), 2 * core.PANEL_SLOTS)
+
 
 class Profiles(unittest.TestCase):
     def engine(self, cfg=None):
@@ -177,7 +186,7 @@ class Profiles(unittest.TestCase):
         e = self.engine({"panel_buttons": mine})
         self.assertEqual(len(e.cfg["panel_profiles"]), 1)
         self.assertEqual(e.cfg["panel_profiles"][0]["buttons"], mine)
-        self.assertEqual(e.buttons(), mine)
+        self.assertEqual(e.buttons()[:core.PANEL_SLOTS], mine)
 
     def test_cycle_switches_buttons_and_wraps(self):
         a = core.clean_buttons([{"t": "A", "kind": "shortcut", "keys": "a"}])
@@ -397,9 +406,40 @@ class PanelGeometry(unittest.TestCase):
         self.assertFalse(e.over_panel(self.pen(0.1, 0.02)))
 
     def test_right_panel_tab_is_top_right(self):
-        e = self.engine(panel="right", panel_open=False)
+        e = self.engine(panel="right", panel_open_right=False)
         self.assertTrue(e.over_panel(self.pen(0.99, 0.02)))
         self.assertFalse(e.over_panel(self.pen(0.01, 0.02)))
+
+    def test_both_panels_fold_on_their_own(self):
+        e = self.engine(panel="both", panel_open=True, panel_open_right=False)
+        f = core.PANEL_PX / 2160
+        self.assertAlmostEqual(e.panel_frac("left"), f)
+        self.assertEqual(e.panel_frac("right"), 0)
+        self.assertEqual(e.effective_area()[:3:2], [f, 1.0])
+        self.assertTrue(e.over_panel(self.pen(f / 2, 0.5)))      # left, open
+        self.assertTrue(e.over_panel(self.pen(0.99, 0.02)))      # right, folded: its tab
+        self.assertFalse(e.over_panel(self.pen(0.99, 0.5)))
+
+    def test_mask_strip_sits_inside_a_panel_on_its_side(self):
+        e = self.engine(panel="both", panel_open=True, panel_open_right=True, mask_side="right",
+                        masks=[{"id": "a"}], mask_strip_open=True)
+        w, P, M = 2160, core.PANEL_PX, core.STRIP_PX
+        self.assertEqual(e.strip_offset(), P)
+        self.assertAlmostEqual(e.effective_area()[2], 1 - (P + M) / w)
+        self.assertTrue(e.over_panel(self.pen(1 - (P + M / 2) / w, 0.5)))   # in the strip
+        e.cfg["panel_open_right"] = False                                   # folded: past its tab
+        self.assertEqual(e.strip_offset(), core.TAB_PX)
+        e.cfg["mask_strip_open"] = False                                    # strip folded: only its tab
+        x = 1 - (core.TAB_PX + core.TAB_PX / 2) / w
+        self.assertTrue(e.over_panel(self.pen(x, 0.01)))
+        self.assertFalse(e.over_panel(self.pen(x, 0.5)))
+
+    def test_profiles_carry_both_panels(self):
+        profs = core.clean_profiles([{"name": "Old", "buttons": core.DEFAULT_BUTTONS}])
+        self.assertEqual(profs[0]["buttons_right"], core.clean_buttons(core.DEFAULT_BUTTONS_RIGHT))
+        cfg = {"panel_profiles": profs, "panel_profile": 0}
+        core.load_profiles(cfg)
+        self.assertEqual(cfg["panel_buttons_right"], profs[0]["buttons_right"])
 
 
 class TapGestures(unittest.TestCase):

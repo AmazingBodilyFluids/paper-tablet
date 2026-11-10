@@ -314,6 +314,8 @@ ol.steps li .sub { color:var(--dim2); font-size:12px; margin-top:2px; }
 .pm-edge { position:absolute; top:0; bottom:0; background:#000; }
 .pm-head, .pm-foot { position:absolute; line-height:1.1; }
 .pm-foot { text-align:center; }
+.pm-light b { position:absolute; font-weight:700; line-height:1; }
+.pm-light i { position:absolute; border:solid #000; }
 .pm-gbtn { position:absolute; border:solid #000; background:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; }
 .pm-head { font-weight:700; }
 .pm-cell { position:absolute; border:solid #000; background:#fff; display:flex; flex-direction:column; align-items:center;

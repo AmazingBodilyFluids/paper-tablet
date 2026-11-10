@@ -90,8 +90,8 @@
               <p class="hint mts">E-ink can't fade smoothly, so a stroke stays for this long after you lift the pen, then clears in one refresh. Slide all the way right for <b>Until cleared</b>: strokes stay until you press <i>Clear the tablet screen</i> below or a <i>Clear ink</i> button on the panel.</p></div>
             <div class="opt" style="display:block" id="lightRow"><div class="range-row"><span>Front light</span><input type="range" min="0" max="100" step="10" id="lightR"><span class="v" id="lightV"></span></div>
               <p class="hint mts">Also on the tablet, under the shortcut panel. Your own light level comes back when you unplug.</p></div>
-            <div class="opt"><div class="tx"><div class="t1">Shortcut panel</div><div class="t2">16 buttons you choose yourself. Tap with a finger or the pen. <a onclick="go('panel')">Customise the buttons</a></div></div>
-              <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
+            <div class="opt"><div class="tx"><div class="t1">Shortcut panels</div><div class="t2">16 buttons on each side, chosen by you. Tap with a finger or the pen. <a onclick="go('panel')">Customise the buttons</a></div></div>
+              <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="both">Both</button><button data-v="off">Off</button></div></div>
             <div class="opt"><div class="tx"><div class="t1">Finger gestures</div><div class="t2">Three fingers swipe left: undo, right: redo. Two fingers drag to pan, pinch to zoom.</div></div>
               <label class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></label></div>
             <p class="hint mts">Fingers are ignored while the pen is near the screen, so a resting hand does nothing. <span id="lastAction"></span></p>
@@ -125,8 +125,8 @@
               <button class="btn ghost" id="maskDel">Delete</button>
             </div>
             <p class="hint mts">Shaded parts of the tablet screen hold the pen back, like a stencil: dark ignores it, white leaves it alone, grey is in between. Pick None to switch the mask off. <span id="maskInfo"></span></p>
-            <div class="opt"><div class="tx"><div class="t1">Mask shortcut on the tablet</div><div class="t2">A corner tab on the side away from the shortcut panel. Tap it to list your masks, then tap one to switch, or None, or Invert.</div></div>
-              <label class="switch"><input type="checkbox" data-key="mask_panel"><span class="track"></span></label></div>
+            <div class="opt"><div class="tx"><div class="t1">Mask shortcut on the tablet</div><div class="t2">A corner tab at the top of that side, next to a panel there. Tap it to list your masks, then tap one to switch, or None, or Invert.</div></div>
+              <div class="seg maskSide"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
             <div class="opt" style="display:block"><div class="range-row"><span>Contrast</span><input type="range" min="0.25" max="6" step="0.25" data-key="mask_contrast" data-type="float"><span class="v" id="maskConV"></span></div>
               <p class="hint mts">Left of the middle softens the mask towards mid grey; right pushes greys to black or white, until it's a hard cut-out.</p></div>
             <div class="opt"><div class="tx"><div class="t1">Grey areas</div><div class="t2" id="maskModeHint"></div></div>
@@ -223,11 +223,12 @@
     <!-- PANEL BUTTONS -->
     <section class="view" id="view-panel">
       <h1>Panel &amp; gestures</h1>
-      <p class="lead">This is the panel exactly as the tablet draws it. Click a button to change it, drag one onto another to swap them. Changes reach the tablet straight away.</p>
+      <p class="lead">These are the panels exactly as the tablet draws them, one for each side. Click a button to change it, drag one onto another to swap them. Changes reach the tablet straight away.</p>
       <div class="pe mt2">
         <div class="stack">
           <div class="pane pe-mock">
-            <div class="pane-title">On the tablet</div>
+            <div class="row between"><div class="pane-title">On the tablet</div>
+              <div class="seg" id="pmSide" title="Which panel to edit"><button data-v="left" class="on">Left panel</button><button data-v="right">Right panel</button></div></div>
             <div class="prof-row">
               <select class="input" id="profSel" title="Button sets: switch between them with the arrows on the tablet"></select>
               <input class="input" id="profName" maxlength="24" placeholder="Profile name" title="Rename this profile">
@@ -242,11 +243,14 @@
             </div>
           </div>
           <div class="pane">
-            <div class="pane-title">Panel</div>
-            <div class="opt"><div class="tx"><div class="t1">Side</div></div>
-              <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
-            <div class="opt"><div class="tx"><div class="t1">Unfolded</div><div class="t2">The tab in the top corner folds it away for more drawing room</div></div>
-              <label class="switch"><input type="checkbox" data-key="panel_open"><span class="track"></span></label></div>
+            <div class="pane-title">Panels</div>
+            <div class="opt"><div class="tx"><div class="t1">Shown</div><div class="t2">Either side, both, or none. The profile arrows switch both panels together.</div></div>
+              <div class="seg" data-key="panel"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="both">Both</button><button data-v="off">Off</button></div></div>
+            <div class="opt"><div class="tx"><div class="t1">Unfolded</div><div class="t2">The tab in each top corner folds that panel away for more drawing room</div></div>
+              <div class="row"><span class="hint">Left</span><label class="switch"><input type="checkbox" data-key="panel_open"><span class="track"></span></label>
+                <span class="hint">Right</span><label class="switch"><input type="checkbox" data-key="panel_open_right"><span class="track"></span></label></div></div>
+            <div class="opt"><div class="tx"><div class="t1">Mask strip</div><div class="t2">Your masks as a corner tab, inside a panel on the same side</div></div>
+              <div class="seg maskSide"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
             <div class="opt"><div class="tx"><div class="t1">Finger gestures</div><div class="t2">3 fingers swipe: undo / redo. 2 fingers: pan, pinch zoom</div></div>
               <label class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Fingers in this profile</div><div class="t2"><b>Shortcuts</b> turn gestures into keys for your drawing app. <b>Windows touch</b> makes the tablet a touchscreen: apps scroll with inertia, pinch and rotate by themselves. The pen still mutes fingers while it's near.</div></div>
