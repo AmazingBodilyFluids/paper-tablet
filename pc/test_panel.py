@@ -188,7 +188,8 @@ class Profiles(unittest.TestCase):
         e.tablet_action("profile next")
         self.assertEqual(e.cfg["panel_profile"], 1)
         self.assertEqual(e.keys.held, set())  # held keys let go on a switch
-        self.assertIn("toast Krita", e.companion.lines)
+        self.assertIn("unlatch", e.companion.lines)
+        self.assertNotIn("toast Krita", e.companion.lines)  # the profile row shows the name already
         e.tablet_action("press 0")
         self.assertEqual(e.keys.held, {"b"})
         e.tablet_action("profile next")

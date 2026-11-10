@@ -46,6 +46,17 @@ Window {
     readonly property real profY: tabS + 10   // the profile row: arrows either side of its name
     readonly property real profH: 72
     property string profileName: ""
+    // "Finger gestures" at the foot of the panel opens a sheet listing them, as the PC sends
+    // them ("gesturelist [[gesture, action], ...]"); a tap anywhere closes it
+    property var gestureList: []
+    property bool gestureSheet: false
+    property bool sheetPen: false        // the pen closed the sheet: no ink until it lifts
+    readonly property real gBtnY: view.height - footH + 24
+    readonly property real gBtnH: 72
+    function gestureBtnHit(p) {
+        return panelOpen && gesturesOn && inPanel(p) && p.y >= gBtnY && p.y < gBtnY + gBtnH
+    }
+    onGestureSheetChanged: refreshScreen()
     // paper under the ink: plain | lined | squared | dots | cross | blueprint | isometric
     property string paper: "plain"
     property real paperStep: 45          // px between lines (the PC converts from mm)
@@ -159,7 +170,7 @@ Window {
         var a = line.split(" ")
         var c = a.shift()
         if (c === "rot") rot = parseInt(a[0]) % 4
-        else if (c === "mode") { mode = a[0]; endStroke(); if (mode !== "ink") clearInk() }
+        else if (c === "mode") { mode = a[0]; endStroke(); if (mode !== "ink") { clearInk(); gestureSheet = false } }
         else if (c === "next") nextTarget = parseInt(a[0])
         else if (c === "status") status = a.join(" ")
         else if (c === "area") area = a.map(parseFloat)
@@ -192,6 +203,7 @@ Window {
             if (a.length > 3) nativeTouch = a[3] === "1"
         }
         else if (c === "toast") say(a.join(" "))
+        else if (c === "gesturelist") { try { gestureList = JSON.parse(a.join(" ")) } catch (e) { gestureList = [] } }
         else if (c === "state") {
             for (var i = 0; i + 1 < a.length; i += 2) {
                 if (a[i] === "pen") penOut = a[i + 1] === "1"
@@ -269,6 +281,7 @@ Window {
     // Returns what was pressed: -2 for the fold tab, a button index, or -1.
     function pressAt(p) {
         if (tabHit(p)) { fold(); return -2 }
+        if (gestureBtnHit(p)) { gestureSheet = !gestureSheet; return -4 }
         var arrow = profileArrow(p)
         if (arrow) { latched = ({}); act("profile " + (arrow > 0 ? "next" : "prev")); return -3 }
         var i = buttonAt(p)
@@ -324,6 +337,12 @@ Window {
             endStroke()
             if (touching && penBtn === -1) { penBtn = pressAt(p); if (penBtn === -1) penBtn = 99 }
             else if (!touching || !inPanel(p)) { if (penBtn >= 0 && penBtn !== 99) releaseBtn(penBtn, true); else pressing = -1; penBtn = -1 }
+            return
+        }
+        if (sheetPen || (touching && gestureSheet)) {  // a tap closes the gestures sheet, and draws nothing
+            endStroke()
+            if (touching && !sheetPen) { gestureSheet = false; sheetPen = true }
+            if (!touching) sheetPen = false
             return
         }
         penDown = touching
@@ -714,6 +733,35 @@ Window {
             color: "transparent"; border.color: "black"; border.width: 2
         }
 
+        // ---------------------------------------------------------------- finger gestures sheet
+        Rectangle {
+            id: sheet
+            visible: win.mode === "ink" && win.gestureSheet
+            readonly property real areaX: (win.panelSide === "left" ? win.panelW : 0) + (win.stripSide === "left" ? win.stripW : 0)
+            readonly property real areaW: view.width - win.panelW - win.stripW
+            width: Math.min(areaW - 80, 960); height: sheetCol.height + 64
+            x: areaX + (areaW - width) / 2; y: Math.max(40, (view.height - height) / 2)
+            color: "white"; border.width: 4; border.color: "black"; radius: 18
+            Column {
+                id: sheetCol
+                x: 40; y: 32; width: sheet.width - 80; spacing: 0
+                Text { text: "FINGER GESTURES"; font.pixelSize: 24; font.bold: true; font.letterSpacing: 4; color: "black"
+                       bottomPadding: 18 }
+                Repeater {
+                    model: win.gestureList
+                    Item {
+                        width: sheetCol.width; height: 62
+                        Rectangle { width: parent.width; height: 2; color: "black"; antialiasing: false }
+                        Text { x: 0; y: 2; width: parent.width * 0.48; height: 60; verticalAlignment: Text.AlignVCenter
+                               text: modelData[0]; font.pixelSize: 28; font.bold: true; color: "black"; elide: Text.ElideRight }
+                        Text { x: parent.width * 0.5; y: 2; width: parent.width * 0.5; height: 60; verticalAlignment: Text.AlignVCenter
+                               text: modelData[1]; font.pixelSize: 28; color: "black"; elide: Text.ElideRight }
+                    }
+                }
+                Text { topPadding: 22; text: "Tap anywhere to close"; font.pixelSize: 22; color: "black" }
+            }
+        }
+
         // ---------------------------------------------------------------- mask strip
         Item {
             visible: win.stripW > 0
@@ -791,8 +839,8 @@ Window {
                     }
                 }
             }
-            Text { x: 22; y: win.profY + win.profH + 8; width: parent.width - 44; text: win.toast || win.status
-                   font.pixelSize: 21; font.bold: win.toast !== ""; color: "black"; elide: Text.ElideRight }
+            Text { x: 22; y: win.profY + win.profH + 8; width: parent.width - 44; text: win.toast
+                   font.pixelSize: 21; font.bold: true; color: "black"; elide: Text.ElideRight }
             Repeater {
                 model: win.buttons.length
                 Item {
@@ -826,12 +874,18 @@ Window {
                     }
                 }
             }
+            Rectangle {  // opens the gestures sheet
+                visible: win.gesturesOn
+                x: 16; y: win.gBtnY; width: parent.width - 32; height: win.gBtnH; radius: 14
+                border.width: 3; border.color: "black"; color: win.gestureSheet ? "black" : "white"
+                Text { anchors.centerIn: parent; width: parent.width - 20; horizontalAlignment: Text.AlignHCenter
+                       text: "Finger gestures"; font.pixelSize: 24; font.bold: true; fontSizeMode: Text.HorizontalFit
+                       minimumPixelSize: 14; color: win.gestureSheet ? "white" : "black" }
+            }
             Text {
-                x: 22; y: view.height - win.footH + 18; width: parent.width - 44; wrapMode: Text.Wrap
-                font.pixelSize: 19; color: "black"; lineHeight: 1.1
-                text: win.gesturesOn && win.nativeTouch ? "Fingers work as a touchscreen in Windows: scroll, pinch, tap"
-                    : win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
-                                     : "Power button: back to notebooks"
+                x: 22; y: win.gesturesOn ? win.gBtnY + win.gBtnH + 20 : view.height - win.footH + 24
+                width: parent.width - 44; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
+                font.pixelSize: 19; color: "black"; text: "Power button: back to notebooks"
             }
         }
 
@@ -882,6 +936,11 @@ Window {
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i], p = Qt.point(t.x, t.y)
                     console.warn("LOG:touch " + Math.round(t.x) + "," + Math.round(t.y) + " size " + Math.round(win.touchSize(t)))
+                    if (win.gestureSheet && !win.inPanel(p)) {  // a tap closes the sheet and does nothing else
+                        win.gestureSheet = false
+                        var tbx = win.touchBtn; tbx[t.pointId] = -1; win.touchBtn = tbx
+                        continue
+                    }
                     if (win.inStrip(p)) {  // a mask tile: picked at once, the finger does nothing more
                         var tbs = win.touchBtn; tbs[t.pointId] = -1; win.touchBtn = tbs
                         win.stripPick(p)

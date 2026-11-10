@@ -9,6 +9,7 @@ tablet screen as configured. When the cable is pulled the stream ends, and the t
 gives the pen and the screen back to the notebook app a few seconds later (keepalive in
 rmpp-pen and rmpp-companion), so nothing is left behind on either side.
 """
+import base64
 import collections
 import dataclasses
 import json
@@ -624,7 +625,8 @@ class Engine:
 
     def snapshot(self):
         c = self.calibration or {}
-        mon = [{"index": i, "label": f"Display {i + 1}{' (main)' if i == 0 else ''}  {r[2] - r[0]}×{r[3] - r[1]}"}
+        mon = [{"index": i, "label": f"Display {i + 1}{' (main)' if i == 0 else ''}  {r[2] - r[0]}×{r[3] - r[1]}",
+                "w": r[2] - r[0], "h": r[3] - r[1]}
                for i, r in enumerate(self.monitors)]
         cal = None
         if c:
@@ -645,7 +647,8 @@ class Engine:
             "device": self.pen and {"name": self.pen["name"], "kernel": self.info.get("release", ""),
                                     "tilt": "TILT_X" in self.pen["abs"]},
             "model": {"key": self.model.key, "name": self.model.name, "verified": self.model.verified,
-                      "frontlight": self.model.frontlight, "developer_mode": self.model.developer_mode},
+                      "frontlight": self.model.frontlight, "developer_mode": self.model.developer_mode,
+                      "px_per_mm": self.model.px_per_mm},
             "monitors": mon, "calibration": cal, "calibrating": calibrating, "cal_result": self.cal_result,
             "cal_modes": {k: v["label"] for k, v in CAL_MODES.items()},
             "rotations": list(ROTATIONS), "aspect": self.mapper.oriented_aspect(),
@@ -656,6 +659,7 @@ class Engine:
             "view": self.view_size(), "panel_px": PANEL_PX, "tab_px": TAB_PX,
             "key_names": sorted(keys.VK), "key_labels": keys.LABEL, "default_buttons": DEFAULT_BUTTONS,
             "pen_rate": self.rate.last, "mask_ver": self.pmask.ver, "mask_pct": round(100 * self.pmask.coverage()),
+            "gesture_list": self.gesture_list(), "trace_key": self.trace_key(), "mask_vers": {k: m.ver for k, m in self.masks.items()},
             "strip_px": STRIP_PX, "strip_side": self.strip_side(), "strip_shown": bool(self.strip_frac()), "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
         }
 
@@ -743,7 +747,8 @@ class Engine:
         if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
                    "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
                    "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
-                   "trace_adjust", "light", "mask_on", "mask_invert", "mask_panel", "mask_strip_open"):
+                   "trace_adjust", "light", "mask_on", "mask_invert", "mask_panel", "mask_strip_open",
+                   "taps"):
             self.sync_companion()
         if key in ("mask_contrast", "mask_invert"):
             self.push_mask()
@@ -753,10 +758,33 @@ class Engine:
             self.companion.send("toast Front light: " + ("full" if val else "back to your level"))
         if key == "panel_profile" and self.companion.running:
             self.companion.send("unlatch")
-            self.companion.send("toast " + self.cfg["panel_profiles"][self.cfg["panel_profile"]]["name"])
         if key == "tilt" and self.worker and self.worker.translator and self.pen:
             self.worker.translator.has_tilt = bool(val) and "TILT_X" in self.pen["abs"]
         self.changed()
+
+    # ---- for the desktop app's picture of the tablet screen
+    def trace_key(self):
+        """Names the tracing image's current file version, so the page knows to fetch it again."""
+        path = self.cfg.get("trace_file") or ""
+        try:
+            st = os.stat(path)
+        except OSError:
+            return ""
+        return f"{path}|{st.st_mtime}|{st.st_size}" if st.st_size <= TRACE_MAX_BYTES else ""
+
+    def trace_image(self):
+        """The tracing image as a data URL (as the tablet gets it: the file itself), or None."""
+        path = self.cfg.get("trace_file") or ""
+        if not self.trace_key():
+            return None
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "gif": "gif", "bmp": "bmp", "webp": "webp"}.get(ext, "png")
+        with open(path, "rb") as f:
+            return f"data:image/{mime};base64," + base64.b64encode(f.read()).decode("ascii")
+
+    def mask_thumbs(self):
+        """Each mask's thumbnail for the tablet's mask strip, as data URLs by mask id."""
+        return {k: "data:image/png;base64," + base64.b64encode(m.thumb()).decode("ascii") for k, m in self.masks.items()}
 
     def view_size(self):
         """The tablet screen as it sits on the desk, in panel pixels (width, height)."""
@@ -1022,6 +1050,23 @@ class Engine:
 
     def buttons(self):
         return clean_buttons(self.cfg.get("panel_buttons") or DEFAULT_BUTTONS)
+
+    def gesture_list(self):
+        """The finger gestures as [gesture, what it does] rows: the tablet's gestures sheet and the
+        desktop app's picture of it. Taps are listed only when they have keys."""
+        if not self.cfg.get("gestures", True):
+            return []
+        if self.touch_mode() == "windows":
+            rows = [["One finger", "Touch in Windows"], ["Two fingers", "Scroll, pinch to zoom"]]
+        else:
+            rows = [["3 fingers, swipe left", "Undo"], ["3 fingers, swipe right", "Redo"],
+                    ["2 fingers, drag", "Pan the canvas"], ["2 fingers, pinch", "Zoom"]]
+            rows.append(["5 fingers, twist", "Rotate the canvas"])
+            for slot, t in clean_taps(self.cfg.get("taps")).items():
+                if t["keys"]:
+                    rows.append([TAP_SLOTS[slot], t["t"] or keys.label(t["keys"])])
+        rows.append(["5 fingers, swipe down", "Clear ink, refresh the screen"])
+        return rows
 
     def companion_buttons(self):
         """The layout as the tablet draws it: title, second line, how a press behaves."""
@@ -1522,6 +1567,7 @@ class Engine:
         c.send(f"gestures {int(bool(self.cfg.get('gestures', True)))} {int(self.cfg.get('swipe_step', 100))} "
                f"{float(self.cfg.get('palm_size', 0))} {int(self.touch_mode() == 'windows')}")
         c.send("buttons " + json.dumps(self.companion_buttons(), separators=(",", ":")))
+        c.send("gesturelist " + json.dumps(self.gesture_list(), separators=(",", ":")))
         profs = self.cfg["panel_profiles"]
         c.send(f"profile {self.cfg['panel_profile']} {len(profs)} {profs[self.cfg['panel_profile']]['name']}")
         c.send("area " + " ".join(f"{a:.4f}" for a in self.effective_area()))

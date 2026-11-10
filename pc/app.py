@@ -141,6 +141,13 @@ class Api:
     def set_mask(self, b64):
         return self._engine.set_mask(b64)
 
+    # the Tablet screen page's picture: the images the tablet is sent
+    def trace_image(self):
+        return self._engine.trace_image()
+
+    def mask_thumbs(self):
+        return self._engine.mask_thumbs()
+
     def mask_op(self, name):
         self._engine.mask_op(name)
 
