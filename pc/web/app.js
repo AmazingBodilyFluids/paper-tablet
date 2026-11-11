@@ -129,7 +129,7 @@ function render() {
 
   if (document.activeElement !== $("#wifiOn")) $("#wifiOn").checked = !!S.cfg.wifi;
   $("#wifiInfo").textContent = S.cfg.wifi
-    ? (S.via === "wifi" && S.connected ? `Connected over Wi-Fi to ${S.cfg.wifi_host}.` : `When the cable is out, the app looks for the tablet at ${S.cfg.wifi_host || "?"}. Its address is refreshed whenever you plug in.`)
+    ? (S.via === "wifi" && S.connected ? `Connected over Wi-Fi to ${S.cfg.wifi_host}.` : `When the cable is out, the app looks for the tablet at ${S.cfg.wifi_host || "?"}. If the router gives it a new address, the app finds it again by its key.`)
     : "Turn this on with the cable plugged in and the tablet on your Wi-Fi.";
   $("#devName").textContent = S.device ? S.model.name + (S.model.verified ? "" : " (beta)") : (S.ssh ? "Tablet found" : "Not connected");
   $("#devMeta").textContent = S.device ? `${S.cfg.host} · kernel ${S.device.kernel}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
