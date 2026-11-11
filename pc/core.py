@@ -986,6 +986,44 @@ class Engine:
         self.use_mask(self.cfg.get("mask_active", "") if self.cfg.get("mask_on") or from_hex is not None else "")
         self.cfg["mask_on"] = bool(self.cfg["mask_active"])
 
+    def mask_src_path(self, mid):
+        return os.path.join(os.path.dirname(rt.CONFIG_PATH), f"penmask-{mid}-src.png")
+
+    def set_mask_source(self, data_url):
+        """Keep the image the active mask was made from (a PNG data URL from the page), so moving and
+        zooming it later starts from the image itself, as with the tracing image."""
+        head, _, b64 = str(data_url).partition(",")
+        data = base64.b64decode(b64)
+        if not head.startswith("data:image/png") or not data.startswith(b"\x89PNG") or len(data) > 40_000_000:
+            raise ValueError("not a PNG image")
+        with self.lock:
+            entry = self.mask_entry()
+            if entry is None:
+                return False
+            path = self.mask_src_path(entry["id"])
+            with open(path + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(path + ".tmp", path)
+            entry["src"] = True
+            entry["place"] = {"s": 1.0, "ox": 0.0, "oy": 0.0}
+            self.save()
+        self.changed()
+        return True
+
+    def mask_source(self, mid=None):
+        """The active mask's own image as a data URL, with where it sits: {url, s, ox, oy}, or None
+        for a mask without one (made before images were kept, or cleared)."""
+        entry = self.mask_entry(mid)
+        if entry is None or not entry.get("src"):
+            return None
+        try:
+            with open(self.mask_src_path(entry["id"]), "rb") as f:
+                url = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+        except OSError:
+            return None
+        place = entry.get("place") or {}
+        return {"url": url, "s": float(place.get("s", 1)), "ox": float(place.get("ox", 0)), "oy": float(place.get("oy", 0))}
+
     def mask_entry(self, mid=None):
         mid = self.cfg.get("mask_active") if mid is None else mid
         return next((m for m in self.cfg["masks"] if m["id"] == mid), None)
@@ -1046,10 +1084,11 @@ class Engine:
                 return
             self.cfg["masks"] = [m for m in self.cfg["masks"] if m["id"] != mid]
             self.masks.pop(mid, None)
-            try:
-                os.remove(self.mask_path(mid))
-            except (OSError, TypeError):
-                pass
+            for path in (self.mask_path(mid), self.mask_src_path(mid)):
+                try:
+                    os.remove(path)
+                except (OSError, TypeError):
+                    pass
             nxt = self.cfg["masks"][0]["id"] if self.cfg["masks"] and self.cfg["mask_active"] == mid else None
         self.refresh_mapper()
         if nxt is not None or self.cfg["mask_active"] == mid:
@@ -1066,13 +1105,26 @@ class Engine:
         return self.pmask
 
     # ---- changes to the active mask, from the page or the tablet; each goes to the tablet as an image
-    def set_mask(self, b64):
+    def set_mask(self, b64, place=None):
+        """The active mask's cells; place = {s, ox, oy}: where its own image now sits."""
         self.editable_mask().set_b64(b64)
+        entry = self.mask_entry()
+        if place and entry is not None and entry.get("src"):
+            entry["place"] = {k: round(min(20.0, max(-20.0, float(place.get(k, d)))), 4)
+                              for k, d in (("s", 1), ("ox", 0), ("oy", 0))}
+            entry["place"]["s"] = max(0.05, entry["place"]["s"])
+            with self.lock:
+                self.save()
         self.mask_changed()
         return self.pmask.ver
 
     def mask_op(self, name):
         self.editable_mask().op(name)
+        entry = self.mask_entry()
+        if entry is not None and entry.get("src"):
+            entry["src"] = False  # the cells no longer come from the image
+            with self.lock:
+                self.save()
         self.mask_changed()
 
     def mask_changed(self):

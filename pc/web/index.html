@@ -74,7 +74,7 @@
         <div class="stage-head">
           <div class="pane-title">Tablet screen, as it sits on your desk</div>
           <span class="hint" id="scrHint"></span>
-          <div class="seg" id="scrDrag"><button data-v="trace" class="on">Drag moves the image</button><button data-v="mask">Drag moves the mask</button></div>
+          <div class="seg" id="scrDrag" title="What dragging on the picture moves"><button data-v="trace" class="on">Move image</button><button data-v="mask">Move mask</button></div>
         </div>
         <div class="preview-wrap stage" id="scrWrap"><canvas id="scrPreview"></canvas></div>
         <div class="row between mts">
@@ -133,6 +133,8 @@
               <div class="seg" data-key="mask_mode"><button data-v="fade">Fade</button><button data-v="gate">Firmer press</button></div></div>
             <div class="opt"><div class="tx"><div class="t1">Invert or clear</div><div class="t2">Invert swaps black and white, and pressing it again swaps them back. The tablet has the same toggle under its mask corner tab.</div></div>
               <div class="row"><button class="btn ghost" id="maskInv" onclick="maskInvert()">Invert</button><button class="btn ghost" onclick="maskOp('clear')">Clear</button></div></div>
+            <div class="opt"><div class="tx"><div class="t1">Position</div><div class="t2">Drag the mask on the tablet picture above to move it; the mouse wheel or a pinch zooms it. The tablet follows when you let go.</div></div>
+              <button class="btn ghost" id="maskCentre" onclick="maskCentre()">Centre</button></div>
           </div>
           <div class="pane">
             <div class="pane-title">Shapes</div>

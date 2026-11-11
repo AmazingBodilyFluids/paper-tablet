@@ -3,6 +3,9 @@ import threading
 import time
 import types
 import base64
+import os
+import shutil
+import tempfile
 import unittest
 import zlib
 
@@ -381,6 +384,30 @@ class TraceMask(Profiles):
         self.assertEqual(e.cfg["mask_active"], b)
         e.rename_mask(b, "  Ruler  ")
         self.assertEqual(e.cfg["masks"], [{"id": b, "name": "Ruler", "contrast": 1.0, "mode": "fade", "invert": False}])
+
+    def test_a_mask_keeps_its_image_and_place(self):
+        e = self.masked_engine()
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        e.mask_src_path = lambda mid: os.path.join(d, f"{mid}-src.png")
+        e.save = lambda: None
+        a = e.new_mask("Circle")
+        self.assertIsNone(e.mask_source())                      # no image yet
+        with self.assertRaises(ValueError):
+            e.set_mask_source("data:text/html;base64," + base64.b64encode(b"<b>").decode())
+        png = b"\x89PNG\r\n\x1a\n" + b"x" * 20
+        self.assertTrue(e.set_mask_source("data:image/png;base64," + base64.b64encode(png).decode()))
+        lv = base64.b64encode(bytes(self.N * self.N)).decode()
+        e.set_mask(lv, {"s": 0.5, "ox": 0.25, "oy": -0.1})
+        m = e.mask_source()
+        self.assertEqual((m["s"], m["ox"], m["oy"]), (0.5, 0.25, -0.1))
+        self.assertEqual(base64.b64decode(m["url"].split(",", 1)[1]), png)
+        e.set_mask(lv, {"s": 0, "ox": 99, "oy": 0})              # kept in sensible bounds
+        self.assertEqual((e.mask_source()["s"], e.mask_source()["ox"]), (0.05, 20.0))
+        e.mask_op("clear")                                      # cleared: the cells no longer come from the image
+        self.assertIsNone(e.mask_source())
+        e.delete_mask(a)
+        self.assertFalse(os.path.exists(os.path.join(d, f"{a}-src.png")))
 
     def test_old_hex_masks_carry_over(self):
         old = "8" + "0" * (72 * 72 // 4 - 1)  # 1-bit format: only the first cell set

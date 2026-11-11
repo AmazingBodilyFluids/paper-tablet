@@ -141,8 +141,14 @@ class Api:
         """The pen mask as stored (before contrast): base64 of N x N bytes, and its version."""
         return {"b64": self._engine.pmask.b64(), "ver": self._engine.pmask.ver, "n": penmask.N}
 
-    def set_mask(self, b64):
-        return self._engine.set_mask(b64)
+    def set_mask(self, b64, place=None):
+        return self._engine.set_mask(b64, place)
+
+    def set_mask_source(self, data_url):
+        return self._engine.set_mask_source(data_url)
+
+    def mask_source(self):
+        return self._engine.mask_source()
 
     # the Tablet screen page's picture: the images the tablet is sent
     def trace_image(self):
