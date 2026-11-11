@@ -1,5 +1,6 @@
 """Panel buttons, key combinations and tablet actions (no Windows, no tablet needed)."""
 import threading
+import time
 import types
 import base64
 import unittest
@@ -580,6 +581,65 @@ class WiFi(unittest.TestCase):
     def test_reads_the_wlan_address(self):
         self.assertEqual(core.Engine.wlan_ip(b"3: wlan0    inet 10.0.0.7/24 brd 10.0.0.255 scope global wlan0"), "10.0.0.7")
         self.assertEqual(core.Engine.wlan_ip(b""), "")
+
+    def watch_once(self, e):
+        class Stop:
+            def __init__(self): self.n = 0
+            def is_set(self): return self.n > 0
+            def wait(self, t): self.n += 1
+        e._stop = Stop()
+        e._watch()
+
+    def test_wifi_connects_only_on_the_button(self):
+        e = self.engine(via="", connected=False, wifi=True, wifi_host="192.168.0.100", host_key="ssh-ed25519 AAAAkey",
+                        onboarded=True, auto_connect=True)
+        e.worker = None
+        e.link = e.ssh_port = e.wifi_up = False
+        e.wifi_go = e.wifi_knock = e.wifi_lost = e.wifi_search_at = 0
+        e.wifi_search = None
+        e.manual_off, e.retry_at = False, 0
+        e.status = ("idle", "")
+        e.set_status = lambda k, t: setattr(e, "status", (k, t))
+        knocked, started = [], []
+        real_link, core.usb_link = core.usb_link, lambda h: False
+        self.addCleanup(setattr, core, "usb_link", real_link)
+        core.port_open = lambda h, *a, **k: knocked.append(h) or h == "192.168.0.100"
+        real_w, core.Worker = core.Worker, lambda eng: types.SimpleNamespace(start=lambda: started.append(1), is_alive=lambda: True, connected=False)
+        self.addCleanup(setattr, core, "Worker", real_w)
+        for _ in range(3):
+            self.watch_once(e)
+        self.assertNotIn("192.168.0.100", knocked)  # never knocks on Wi-Fi by itself
+        self.assertEqual(started, [])
+        e.connect()                                 # the button
+        self.assertEqual(e.status[0], "connecting")
+        self.assertEqual(started, [])
+        self.watch_once(e)
+        self.assertEqual((e.via, started), ("wifi", [1]))
+        e.worker = types.SimpleNamespace(connected=False, is_alive=lambda: False)
+        e.companion = types.SimpleNamespace(chan=None, stop=lambda: None)
+        e.on_disconnected(e.worker)                 # Wi-Fi dropped: no reconnect by itself
+        self.assertEqual(e.wifi_go, 0)
+        knocked.clear()
+        e.wifi_knock = 0
+        self.watch_once(e)
+        self.assertNotIn("192.168.0.100", knocked)
+
+    def test_wifi_button_gives_up_with_a_message(self):
+        e = self.engine(via="", connected=False, wifi=True, wifi_host="192.168.0.100", host_key="", onboarded=True)
+        e.worker = None
+        e.link = e.ssh_port = e.wifi_up = False
+        e.wifi_knock = e.wifi_lost = e.wifi_search_at = 0
+        e.wifi_search = None
+        e.manual_off, e.retry_at = False, 0
+        e.set_status = lambda k, t: setattr(e, "status", (k, t))
+        real_link, core.usb_link = core.usb_link, lambda h: False
+        self.addCleanup(setattr, core, "usb_link", real_link)
+        core.port_open = lambda *a, **k: False
+        e.connect()
+        e.wifi_go = time.time() - 1                 # its 25 s are up
+        self.watch_once(e)
+        self.assertEqual((e.status[0], e.wifi_go), ("error", 0))
+        self.assertIn("press Connect again", e.status[1])
 
     def test_switching_on_needs_the_cable(self):
         e = self.engine(via="wifi")

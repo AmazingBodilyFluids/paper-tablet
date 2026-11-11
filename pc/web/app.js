@@ -76,6 +76,7 @@ function status() {
   if (st.kind === "error") return { dot: "err", lbl: "Problem", title: "Couldn't connect", text: st.text };
   if (!S.cfg.onboarded) return { dot: "warn", lbl: "Setup", title: "Let's set up your tablet", text: "The setup guide walks you through it step by step." };
   if (S.ssh && !S.cfg.auto_connect) return { dot: "warn", lbl: "Tablet found", title: "Tablet plugged in", text: "Press Connect to start." };
+  if (!S.ssh && S.cfg.wifi && S.cfg.wifi_host) return { dot: "", lbl: "Waiting", title: "Plug in your tablet, or use Wi-Fi", text: "With the cable it starts by itself. Over Wi-Fi it only connects when you press Connect over Wi-Fi, and stays until you press Disconnect." };
   if (S.link && !S.ssh) return { dot: "warn", lbl: "Tablet found", title: "Almost there", text: "The tablet is plugged in but isn't accepting connections. Is developer mode on? Open the setup guide for help." };
   return { dot: "", lbl: "Waiting", title: "Plug in your tablet", text: "Connect the reMarkable with its USB cable and unlock it. Everything starts by itself." };
 }
@@ -116,6 +117,7 @@ function banner(s) {
   acts.innerHTML = "";
   if (!S.cfg.onboarded) acts.append(button("Open the setup guide", "acc", () => Wizard.open()));
   else if (!S.connected && S.ssh) acts.append(button("Connect", "acc", () => api().connect()));
+  else if (!S.connected && S.cfg.wifi && S.cfg.wifi_host && S.status.kind !== "connecting") acts.append(button("Connect over Wi-Fi", "acc", () => api().connect()));
   else if (closed) acts.append(button("Show it again", "acc", () => { api().restart_screen(); toast("Starting the tablet screen…"); }));
   else if (uncal) acts.append(button("Calibrate now", "acc", () => Cal.open()));
   else if (S.calibrating) acts.append(button("Show calibration", "", () => Cal.open(2)));
@@ -129,7 +131,7 @@ function render() {
 
   if (document.activeElement !== $("#wifiOn")) $("#wifiOn").checked = !!S.cfg.wifi;
   $("#wifiInfo").textContent = S.cfg.wifi
-    ? (S.via === "wifi" && S.connected ? `Connected over Wi-Fi to ${S.cfg.wifi_host}.` : `When the cable is out, the app looks for the tablet at ${S.cfg.wifi_host || "?"}. If the router gives it a new address, the app finds it again by its key.`)
+    ? (S.via === "wifi" && S.connected ? `Connected over Wi-Fi to ${S.cfg.wifi_host}.` : `With the cable out, press Connect over Wi-Fi on Home (last seen at ${S.cfg.wifi_host || "?"}). It never connects or reconnects over Wi-Fi by itself. If the router gives the tablet a new address, the app finds it again by its key.`)
     : "Turn this on with the cable plugged in and the tablet on your Wi-Fi.";
   $("#devName").textContent = S.device ? S.model.name + (S.model.verified ? "" : " (beta)") : (S.ssh ? "Tablet found" : "Not connected");
   $("#devMeta").textContent = S.device ? `${S.cfg.host} · kernel ${S.device.kernel}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
@@ -975,7 +977,7 @@ const Wizard = {
         const on = !!S_.cfg.wifi, m = this.wifiMsg;
         return `
         <div class="lbl">Step 6 · Wi-Fi (optional)</div><h1 class="mt">Use it without the cable too</h1>
-        <p class="lead">With the cable plugged in, the app can switch on reMarkable's own SSH over Wi-Fi. From then on it finds the tablet on your network whenever the cable is out. The cable stays the faster link.</p>
+        <p class="lead">With the cable plugged in, the app can switch on reMarkable's own SSH over Wi-Fi. From then on, with the cable out, press Connect over Wi-Fi on Home. Wi-Fi only connects and disconnects when you press the button. The cable stays the faster link.</p>
         <div class="note warn mt"><svg><use href="#i-warn"/></svg><div>This makes the tablet's login reachable on your network. The app only logs in with its own key and only to this tablet, but the tablet's password works there too, so turn it on only on networks you trust.</div></div>
         <label class="check"><input type="checkbox" id="wzWifi" ${on ? "checked" : ""} ${this.wifiBusy ? "disabled" : ""}><div>${this.wifiBusy ? "Switching Wi-Fi…" : "Connect over Wi-Fi too"}${on && S_.cfg.wifi_host ? ` <span class="muted">(the tablet is at ${esc(S_.cfg.wifi_host)})</span>` : ""}</div></label>
         <div class="mt">${m ? `<div class="note ${m.ok ? "ok" : "warn"}"><svg><use href="#i-${m.ok ? "check" : "warn"}"/></svg><div>${esc(m.text)}</div></div>` : ""}</div>

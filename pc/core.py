@@ -684,6 +684,7 @@ class Engine:
         self.wifi_lost = 0      # since when its Wi-Fi address stopped answering
         self.wifi_search = None  # the thread looking for it at a new address
         self.wifi_search_at = 0
+        self.wifi_go = 0        # Wi-Fi only connects on a button press: until when to keep trying
         self.manual_off = False  # user pressed Disconnect: don't auto-connect until replugged
         self.retry_at = 0
         self.peak = 0
@@ -1407,8 +1408,13 @@ class Engine:
                 link = usb_link(host) if host.startswith("10.11.99.") else port_open(host, 22)
                 ssh = link and port_open(host, 22)
                 self.via = "usb" if ssh else ""
-                if not ssh and self.cfg.get("wifi") and self.cfg.get("wifi_host"):
-                    if time.time() >= self.wifi_knock:  # each knock starts an SSH server process there
+                # Wi-Fi never connects by itself, only after Connect is pressed (wifi_go)
+                if not ssh and self.cfg.get("wifi") and self.cfg.get("wifi_host") and self.wifi_go:
+                    if time.time() > self.wifi_go and not self.wifi_up:
+                        self.wifi_go = 0
+                        self.set_status("error", f"The tablet didn't answer on Wi-Fi (last seen at {self.cfg['wifi_host']}). "
+                                        "Check it's awake and on the same network as this computer, then press Connect again.")
+                    elif time.time() >= self.wifi_knock:  # each knock starts an SSH server process there
                         self.wifi_knock = time.time() + 3
                         self.wifi_up = port_open(self.cfg["wifi_host"], 22, 0.5)
                     if self.wifi_up:
@@ -1423,9 +1429,10 @@ class Engine:
                     self.manual_off = False  # unplugged: the next plug-in connects again
                     self.retry_at = 0
                     if not self.connected:
-                        self.set_status("idle", "Waiting for the tablet: plug in the USB cable")
+                        self.set_status("idle", "Waiting for the tablet: plug in the USB cable" + (
+                            ", or press Connect to use Wi-Fi" if self.cfg.get("wifi") else ""))
                 self.changed()
-            if (ssh and self.cfg["onboarded"] and self.cfg["auto_connect"] and not self.manual_off
+            if (ssh and self.cfg["onboarded"] and (self.cfg["auto_connect"] or self.via == "wifi") and not self.manual_off
                     and time.time() >= self.retry_at and not (self.worker and self.worker.is_alive())):
                 self.connect()
             self._stop.wait(1.0)
@@ -1469,6 +1476,14 @@ class Engine:
         with self.lock:
             if self.worker and self.worker.is_alive():
                 return
+            if not self.ssh_port and self.cfg.get("wifi") and self.cfg.get("wifi_host"):
+                # no cable: look for the tablet on Wi-Fi for a while; _watch connects when it answers
+                self.manual_off = False
+                self.wifi_go = time.time() + 25
+                self.wifi_knock = self.wifi_lost = self.wifi_search_at = 0
+                self.wifi_up = False
+                self.set_status("connecting", "Looking for the tablet on Wi-Fi…")
+                return
             self.manual_off = False
             self.retry_at = 0
             self.worker = Worker(self)
@@ -1476,6 +1491,7 @@ class Engine:
 
     def disconnect(self):
         self.manual_off = True
+        self.wifi_go = 0
         self.companion.stop()
         w, self.worker = self.worker, None
         if w:
@@ -1527,7 +1543,7 @@ class Engine:
         one. Look for it (by its pinned key) at most once a minute, in the background."""
         now = time.time()
         self.wifi_lost = self.wifi_lost or now
-        if (now - self.wifi_lost < 10 or now < self.wifi_search_at or not self.cfg.get("host_key")
+        if (now - self.wifi_lost < 2 or now < self.wifi_search_at or not self.cfg.get("host_key")
                 or (self.wifi_search and self.wifi_search.is_alive())):
             return
         self.wifi_search_at = now + 60
@@ -1588,7 +1604,7 @@ class Engine:
                 self.save()
             self.changed()
             ok = any(port_open(ip, 22, 1.0) or time.sleep(1) for _ in range(5))
-            return {"ok": True, "text": f"Wi-Fi is on. Unplug the cable and the app finds the tablet at {ip}." if ok else
+            return {"ok": True, "text": f"Wi-Fi is on. Unplug the cable, then press Connect over Wi-Fi on Home (the tablet is at {ip})." if ok else
                     f"Wi-Fi is on, but {ip} isn't answering from this computer yet. Is it on the same network?"}
         off_now = False
         if tab:
@@ -1617,6 +1633,8 @@ class Engine:
             if self.via == "wifi" or (host.startswith("10.11.99.") and not usb_link(host)):
                 self.link = self.ssh_port = self.wifi_up = False
                 self.wifi_knock = time.time() + 3
+            if self.via == "wifi":
+                self.wifi_go = 0  # Wi-Fi reconnects only on a button press
             if self.status[0] != "error":
                 self.set_status("idle", "Tablet disconnected" if self.link else
                                 "Wi-Fi connection lost. The notebook app is back on the tablet." if self.via == "wifi" else
