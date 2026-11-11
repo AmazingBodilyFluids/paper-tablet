@@ -36,8 +36,25 @@ class Structs(unittest.TestCase):
 
 
 class Pen(unittest.TestCase):
-    def pen(self):
-        return L.LinuxPen(box=(0, 0, 1920, 1080), make=FakeDev)
+    def pen(self, primed=True):
+        p = L.LinuxPen(box=(0, 0, 1920, 1080), make=FakeDev)
+        p.primed = primed  # most tests skip the one-off in/out below
+        return p
+
+    def test_first_hover_sends_one_real_proximity_out(self):
+        # libinput fakes a proximity-out after 50 ms of stillness until the device has sent a real one
+        p = self.pen(primed=False)
+        p.send(Frame(flags={"INRANGE", "UPDATE"}, x=100, y=50))
+        p.send(Frame(flags={"INRANGE", "UPDATE"}, x=101, y=50))
+        p.send(Frame(flags={"UPDATE"}, x=101, y=50))
+        p.send(Frame(flags={"INRANGE", "UPDATE"}, x=102, y=50))
+        b = p.dev.out
+        self.assertEqual(b[0][:2], [(L.EV_ABS, L.ABS_X, 100), (L.EV_ABS, L.ABS_Y, 50)])
+        self.assertIn((L.EV_ABS, L.ABS_TILT_X, 0), b[0])
+        self.assertEqual(b[0][-1], (L.EV_KEY, L.BTN_TOOL_PEN, 1))
+        self.assertEqual(b[1], [(L.EV_KEY, L.BTN_TOOL_PEN, 0)])
+        self.assertIn((L.EV_KEY, L.BTN_TOOL_PEN, 1), b[2])
+        self.assertEqual(len(b), 6)  # later proximity-ins are plain
 
     def test_device_looks_like_a_tablet(self):
         p = self.pen()

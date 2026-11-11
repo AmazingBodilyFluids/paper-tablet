@@ -121,6 +121,12 @@ class LinuxPen:
                         vendor=0x2D1F, product=0x0001)
         self.tool = None   # BTN_TOOL_PEN / BTN_TOOL_RUBBER while in range
         self.touch = False
+        # libinput assumes a tablet that has never sent a proximity-out is one that never will (some
+        # cheap tablets don't), and then fakes one whenever the pen holds still for 50 ms in hover:
+        # the cursor would drop out and come back. The first real proximity-out turns that off for
+        # good (checked in a VM with libinput 1.25), so the first time the pen comes into range it
+        # goes in, out and in again on the spot, three frames in a row with no visible effect.
+        self.primed = False
 
     def send(self, f):
         l, t, r, b = self.box
@@ -144,6 +150,10 @@ class LinuxPen:
         touching = "INCONTACT" in f.flags
         ev.append((EV_ABS, ABS_PRESSURE, min(self.PRESSURE_MAX, f.pressure) if touching else 0))
         if self.tool is None:
+            if not self.primed:
+                self.dev.emit(ev[:4] + [(EV_ABS, ABS_PRESSURE, 0), (EV_KEY, tool, 1)])
+                self.dev.emit([(EV_KEY, tool, 0)])
+                self.primed = True
             ev.append((EV_KEY, tool, 1))
             self.tool = tool
         if touching != self.touch:

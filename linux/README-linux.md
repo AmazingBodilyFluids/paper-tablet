@@ -40,6 +40,10 @@ Log out and back in once afterwards. Then start Paper Tablet from the launcher, 
 
 ## Things to check if something's off
 
+- **Check the virtual devices without the tablet.** `python3 linux/check_devices.py` creates the pen, touch,
+  keyboard and mouse, sends a short hover, and prints what libinput sees (needs `libinput-tools`; run it with
+  `sudo` if the event list stays empty). `--full` also draws, erases, touches and drags: use it over an empty desktop.
+
 - **"No access to /dev/uinput".** Run `setup.sh` again, log out and in, then check `ls -l /dev/uinput`.
   It should show a `+` (an ACL for your user).
 - **The tablet isn't found.** The tablet's USB network must give your PC an address in `10.11.99.x`. Check
