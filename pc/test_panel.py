@@ -92,6 +92,7 @@ def bare_engine(cfg=None):
     e.set_output = lambda on: e.settings.append(("output", on))
     e.companion = types.SimpleNamespace(running=True)
     e.cal = None
+    e.light_now, e.light_back = None, 85
     e.companion_rotation = lambda: 3
     return e
 
@@ -157,6 +158,15 @@ class TabletActions(unittest.TestCase):
         e.tablet_action("snap 0")
         self.assertEqual(e.settings, [("panel_open", False), ("output", True), ("snap", False)])
 
+    def test_right_panel_buttons_and_fold(self):
+        e = bare_engine({"panel": "both", "panel_buttons_right": [{"t": "Copy", "kind": "shortcut", "keys": "ctrl+c"}]})
+        e.tablet_action("press 16")  # the right panel's first button
+        self.assertEqual([vk for vk, up in e.sent if not up], [0x11, 0x43])
+        e.tablet_action("panel right 0")
+        e.tablet_action("panel left 1")
+        self.assertEqual(e.settings, [("panel_open_right", False), ("panel_open", True)])
+        self.assertEqual(len(e.companion_buttons()), 2 * core.PANEL_SLOTS)
+
 
 class Profiles(unittest.TestCase):
     def engine(self, cfg=None):
@@ -168,7 +178,7 @@ class Profiles(unittest.TestCase):
         e.worker = None
         e.companion = types.SimpleNamespace(running=True, lines=[])
         e.companion.send = e.companion.lines.append
-        e.companion.light = lambda on: None
+        e.companion.light = lambda pct=None: pct
         return e
 
     def test_old_layout_becomes_first_profile(self):
@@ -176,7 +186,7 @@ class Profiles(unittest.TestCase):
         e = self.engine({"panel_buttons": mine})
         self.assertEqual(len(e.cfg["panel_profiles"]), 1)
         self.assertEqual(e.cfg["panel_profiles"][0]["buttons"], mine)
-        self.assertEqual(e.buttons(), mine)
+        self.assertEqual(e.buttons()[:core.PANEL_SLOTS], mine)
 
     def test_cycle_switches_buttons_and_wraps(self):
         a = core.clean_buttons([{"t": "A", "kind": "shortcut", "keys": "a"}])
@@ -188,7 +198,8 @@ class Profiles(unittest.TestCase):
         e.tablet_action("profile next")
         self.assertEqual(e.cfg["panel_profile"], 1)
         self.assertEqual(e.keys.held, set())  # held keys let go on a switch
-        self.assertIn("toast Krita", e.companion.lines)
+        self.assertIn("unlatch", e.companion.lines)
+        self.assertNotIn("toast Krita", e.companion.lines)  # the profile row shows the name already
         e.tablet_action("press 0")
         self.assertEqual(e.keys.held, {"b"})
         e.tablet_action("profile next")
@@ -217,9 +228,45 @@ class PaperAndTrace(Profiles):
         e.tablet_action("trace 120.5 -40 2.5")
         self.assertEqual((e.cfg["trace_x"], e.cfg["trace_y"], e.cfg["trace_scale"]), (120.5, -40.0, 2.5))
         e.tablet_action("traceadjust")
-        e.tablet_action("light")
         self.assertTrue(e.cfg["trace_adjust"])
-        self.assertTrue(e.cfg["light"])
+
+    def test_light_bar_and_light_button(self):
+        e = self.engine()
+        e.tablet_action("lightset 60")  # the bar under the panel: the tablet set it already
+        self.assertEqual((e.cfg["light_level"], e.light_now), (60, 60))
+        self.assertNotIn("light 60", e.companion.lines)
+        e.tablet_action("light")        # a Light button: full ...
+        self.assertEqual(e.cfg["light_level"], 100)
+        self.assertIn("light 100", e.companion.lines)
+        e.tablet_action("light")        # ... and back to where it was
+        self.assertEqual(e.cfg["light_level"], 60)
+        e.set_light(250)
+        self.assertEqual(e.cfg["light_level"], 100)  # clamped
+
+    def test_light_powers_the_frontlight_up(self):
+        # Seen on the device 2026-11-11: bl_power stuck at 4 (powered down), so brightness writes
+        # read back fine but nothing lit. A level above 0 must power it up, 0 powers it down.
+        class Tab:
+            def __init__(self, out): self.cmds, self.out = [], out
+            def run(self, cmd): self.cmds.append(cmd); return 0, self.out, ""
+        c = core.Companion(None)
+        c.tab = Tab("1023 2047 0")
+        self.assertEqual(c.light(50), 50)
+        self.assertIn("echo 0 > /sys/class/backlight/rm_frontlight/bl_power", c.tab.cmds[0])
+        c.light(0)
+        self.assertIn("echo 4 > /sys/class/backlight/rm_frontlight/bl_power", c.tab.cmds[1])
+        c.tab = Tab("2047 2047 4")
+        self.assertEqual(c.light(), 0)  # powered down reads as dark, not full
+        self.assertNotIn("echo", c.tab.cmds[0])
+
+    def test_screen_is_not_optional(self):
+        for gone in ("auto_screen", "grab", "light"):
+            self.assertNotIn(gone, core.DEFAULTS)
+        e = self.engine()
+        e.companion.running = False
+        self.assertFalse(e.want_grab())  # closed on the tablet: the notebooks get the pen
+        e.cal = {"mode": "sheet9", "taps": []}
+        self.assertTrue(e.want_grab())   # calibrating without the screen: keep taps off xochitl
 
     def test_values_are_clamped(self):
         e = self.engine()
@@ -375,9 +422,40 @@ class PanelGeometry(unittest.TestCase):
         self.assertFalse(e.over_panel(self.pen(0.1, 0.02)))
 
     def test_right_panel_tab_is_top_right(self):
-        e = self.engine(panel="right", panel_open=False)
+        e = self.engine(panel="right", panel_open_right=False)
         self.assertTrue(e.over_panel(self.pen(0.99, 0.02)))
         self.assertFalse(e.over_panel(self.pen(0.01, 0.02)))
+
+    def test_both_panels_fold_on_their_own(self):
+        e = self.engine(panel="both", panel_open=True, panel_open_right=False)
+        f = core.PANEL_PX / 2160
+        self.assertAlmostEqual(e.panel_frac("left"), f)
+        self.assertEqual(e.panel_frac("right"), 0)
+        self.assertEqual(e.effective_area()[:3:2], [f, 1.0])
+        self.assertTrue(e.over_panel(self.pen(f / 2, 0.5)))      # left, open
+        self.assertTrue(e.over_panel(self.pen(0.99, 0.02)))      # right, folded: its tab
+        self.assertFalse(e.over_panel(self.pen(0.99, 0.5)))
+
+    def test_mask_strip_sits_inside_a_panel_on_its_side(self):
+        e = self.engine(panel="both", panel_open=True, panel_open_right=True, mask_side="right",
+                        masks=[{"id": "a"}], mask_strip_open=True)
+        w, P, M = 2160, core.PANEL_PX, core.STRIP_PX
+        self.assertEqual(e.strip_offset(), P)
+        self.assertAlmostEqual(e.effective_area()[2], 1 - (P + M) / w)
+        self.assertTrue(e.over_panel(self.pen(1 - (P + M / 2) / w, 0.5)))   # in the strip
+        e.cfg["panel_open_right"] = False                                   # folded: past its tab
+        self.assertEqual(e.strip_offset(), core.TAB_PX)
+        e.cfg["mask_strip_open"] = False                                    # strip folded: only its tab
+        x = 1 - (core.TAB_PX + core.TAB_PX / 2) / w
+        self.assertTrue(e.over_panel(self.pen(x, 0.01)))
+        self.assertFalse(e.over_panel(self.pen(x, 0.5)))
+
+    def test_profiles_carry_both_panels(self):
+        profs = core.clean_profiles([{"name": "Old", "buttons": core.DEFAULT_BUTTONS}])
+        self.assertEqual(profs[0]["buttons_right"], core.clean_buttons(core.DEFAULT_BUTTONS_RIGHT))
+        cfg = {"panel_profiles": profs, "panel_profile": 0}
+        core.load_profiles(cfg)
+        self.assertEqual(cfg["panel_buttons_right"], profs[0]["buttons_right"])
 
 
 class TapGestures(unittest.TestCase):
