@@ -1052,7 +1052,7 @@ $("#wzSkip").onclick = () => Wizard.close();
 
 // The tablet panel's foot is taller when it carries the front-light bar (companion_qml.cpp footH).
 const lightShown = () => !!(S && S.model && S.model.frontlight);
-const foot = () => lightShown() ? 300 : 190;
+const foot = () => lightShown() ? 240 : 120;
 // the light bar as the tablet draws it: "Light N%" over ten steps, black up to the level
 function lightBar(ctx, x, y, w, F) {
   const lv = S.light ?? S.cfg.light_level, pct = lv == null ? -1 : lv;
@@ -1284,7 +1284,6 @@ const Panel = {
         ${cells}
         ${main && S.cfg.gestures !== false ? `<div class="pm-gbtn" title="On the tablet this opens a list of the finger gestures; see Tap gestures here"
           style="left:${px(16)};top:${px(vh - FOOT + 24)};width:${px(W - 32)};height:${px(72)};border-radius:${px(14)};border-width:${px(3)};font-size:${px(24)}">Finger gestures</div>` : ""}
-        ${main ? `<div class="pm-foot" style="left:${px(22)};top:${px(vh - FOOT + (S.cfg.gestures !== false ? 116 : 24))};width:${px(W - 44)};font-size:${px(19)}">Power button: back to notebooks</div>` : ""}
         ${main && lightShown() ? this.lightRow(px, W, vh) : ""}
       </div>`;
     const tab = `<div class="pm-tab" title="Folds the panel away" style="${right ? "right:0" : "left:0"};width:${px(T)};height:${px(T)};border-width:${px(3)}">${chev}</div>`;
@@ -1672,14 +1671,13 @@ const Scr = {
       this.text(ctx, b.t, x + bw / 2, y + bh / 2 - (sub ? 13 : 0), bw - 12, 28, 16, true, fg);
       if (sub) this.text(ctx, sub, x + bw / 2, y + bh / 2 + 17, bw - 12, 18, 12, false, fg);
     });
-    // foot of the main panel: the gestures button, how to leave, and the light bar
+    // foot of the main panel: the gestures button and the light bar
     if (main) {
       const gy = VH - foot() + 24;
       if (c.gestures !== false) {
         this.box(ctx, 16, gy, W - 32, 72, 14, this.sheet ? "#000" : "#fff");
         this.text(ctx, "Finger gestures", W / 2, gy + 36, W - 52, 24, 14, true, this.sheet ? "#fff" : "#000");
       }
-      this.wrap(ctx, "Power button: back to notebooks", W / 2, c.gestures !== false ? gy + 72 + 20 : gy, W - 44, 19);
       if (lightShown()) lightBar(ctx, 16, VH - 92, W - 32, this.F);
     }
     ctx.restore();
