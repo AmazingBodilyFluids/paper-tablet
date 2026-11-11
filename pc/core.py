@@ -301,6 +301,61 @@ def port_open(host, port, timeout=0.6):
         return False
 
 
+def lan_candidates(near, own_ip=None):
+    """Addresses on this PC's own home network (the /24 it uses to reach `near`) where the tablet
+    may have moved to. Private ranges only, never the USB link, so a scan stays on the local
+    network."""
+    import ipaddress
+    try:
+        if own_ip is None:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as u:
+                u.connect((near, 9))  # routing table only, nothing is sent
+                own_ip = u.getsockname()[0]
+        me = ipaddress.ip_address(own_ip)
+    except (OSError, ValueError):
+        return []
+    if not me.is_private or me.is_loopback or own_ip.startswith("10.11.99."):
+        return []
+    net = ipaddress.ip_network(own_ip + "/24", strict=False)
+    return [str(a) for a in net.hosts() if str(a) not in (own_ip, near)]
+
+
+def ssh_host_key(host, timeout=2.0):
+    """The SSH host key at host:22 ("type base64"), without logging in, or None."""
+    import paramiko
+    try:
+        sock = socket.create_connection((host, 22), timeout=timeout)
+    except OSError:
+        return None
+    t = paramiko.Transport(sock)
+    try:
+        t.banner_timeout = t.handshake_timeout = timeout
+        t.start_client(timeout=timeout)
+        k = t.get_remote_server_key()
+        return f"{k.get_name()} {k.get_base64()}"
+    except Exception:
+        return None
+    finally:
+        t.close()
+
+
+def find_tablet(host_key, near, open_port=port_open, key_at=ssh_host_key, candidates=None):
+    """Look over the home network for the tablet whose SSH key was pinned on the cable, for when
+    the router gave it a new address. Only an exact key match counts, so another machine can't
+    pose as the tablet. Returns its address or ""."""
+    from concurrent.futures import ThreadPoolExecutor
+    want = " ".join(host_key.split()[:2])
+    cands = lan_candidates(near) if candidates is None else candidates
+    if not want or not cands:
+        return ""
+    with ThreadPoolExecutor(64) as pool:
+        up = [ip for ip, ok in zip(cands, pool.map(lambda ip: open_port(ip, 22, 0.4), cands)) if ok]
+    for ip in up:
+        if key_at(ip) == want:
+            return ip
+    return ""
+
+
 def ensure_app_key():
     """Create the app's own SSH key once (Ed25519, OpenSSH format, no passphrase, readable only
     by this Windows user's profile). Returns the public key line."""
@@ -626,6 +681,9 @@ class Engine:
         self.via = ""           # how the tablet answers: "usb", "wifi" or not at all
         self.wifi_knock = 0     # when to next knock at its Wi-Fi address
         self.wifi_up = False
+        self.wifi_lost = 0      # since when its Wi-Fi address stopped answering
+        self.wifi_search = None  # the thread looking for it at a new address
+        self.wifi_search_at = 0
         self.manual_off = False  # user pressed Disconnect: don't auto-connect until replugged
         self.retry_at = 0
         self.peak = 0
@@ -1356,6 +1414,9 @@ class Engine:
                     if self.wifi_up:
                         link = ssh = True
                         self.via = "wifi"
+                        self.wifi_lost = 0
+                    else:
+                        self.maybe_search_wifi()
             if (link, ssh) != (self.link, self.ssh_port):
                 self.link, self.ssh_port = link, ssh
                 if not link:
@@ -1460,6 +1521,29 @@ class Engine:
             if word.count(".") == 3 and "/" in word:
                 return word.split("/")[0]
         return ""
+
+    def maybe_search_wifi(self):
+        """The tablet's Wi-Fi address has been silent a while: the router may have given it a new
+        one. Look for it (by its pinned key) at most once a minute, in the background."""
+        now = time.time()
+        self.wifi_lost = self.wifi_lost or now
+        if (now - self.wifi_lost < 10 or now < self.wifi_search_at or not self.cfg.get("host_key")
+                or (self.wifi_search and self.wifi_search.is_alive())):
+            return
+        self.wifi_search_at = now + 60
+        old, key = self.cfg["wifi_host"], self.cfg["host_key"]
+
+        def run():
+            ip = find_tablet(key, old)
+            if ip and self.cfg.get("wifi") and self.cfg.get("wifi_host") == old:
+                print(f"wifi: tablet moved from {old} to {ip}", flush=True)
+                with self.lock:
+                    self.cfg["wifi_host"] = ip
+                    self.save()
+                self.wifi_knock = self.wifi_lost = 0
+                self.changed()
+        self.wifi_search = threading.Thread(target=run, daemon=True)
+        self.wifi_search.start()
 
     def cable_chores(self, tab):
         """On every cable connection: pin the tablet's SSH key, and keep its Wi-Fi address current
