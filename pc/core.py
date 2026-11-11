@@ -9,6 +9,7 @@ tablet screen as configured. When the cable is pulled the stream ends, and the t
 gives the pen and the screen back to the notebook app a few seconds later (keepalive in
 rmpp-pen and rmpp-companion), so nothing is left behind on either side.
 """
+import base64
 import collections
 import dataclasses
 import json
@@ -42,26 +43,30 @@ DEFAULTS = {
     # Wi-Fi login only goes to the tablet that was plugged in
     "wifi": False, "wifi_host": "", "host_key": "", "wifi_off_pending": False, "monitor": 0, "fit": "crop", "edge_lift": True,
     "orientation": "as-calibrated", "area": [0.0, 0.0, 1.0, 1.0], "gamma": 1.0, "threshold": 0.0,
-    "tilt": True, "grab": False, "feedback": "indirect", "companion_rot": "Match calibration",
+    "tilt": True, "feedback": "indirect", "companion_rot": "Match calibration",
     # plug-and-play
-    "auto_connect": True, "auto_output": True, "auto_screen": True, "trail_ms": 1500,
+    "auto_connect": True, "auto_output": True, "trail_ms": 1500,
     "onboarded": False,
     # window: colour theme (web/themes.css), and whether closing the window keeps the app in the tray
     "theme": "intaglio", "close_to_tray": True,
     # hold-to-snap shapes
     "snap": True, "snap_hold_ms": 600, "snap_apps": ", ".join(shapes.DRAWING_APPS),
-    # tablet-screen side panel with shortcut buttons: left | right | off
-    "panel": "left", "panel_open": True, "gestures": True,
+    # tablet-screen side panels with shortcut buttons: left | right | both | off; each folds on its own
+    "panel": "left", "panel_open": True, "panel_open_right": True, "gestures": True,
     # touch contacts bigger than this are a palm; 0 = off. In Qt's units, about 0.75 x the panel's raw
     # TOUCH_MAJOR: measured fingertips 6-16 (raw 8-21), resting palm edge 19-49 (raw 25-63)
     "palm_size": 20,
     "panel_buttons": None,  # filled from DEFAULT_BUTTONS below; always the active profile's buttons
+    "panel_buttons_right": None,  # the same for the right-hand panel (DEFAULT_BUTTONS_RIGHT)
     # named button sets, cycled with the arrows on the tablet panel: [{"name", "buttons"}]
     "panel_profiles": None, "panel_profile": 0,
-    # the tablet screen under the ink: paper pattern, a tracing image, the front light
+    # the tablet screen under the ink: paper pattern, a tracing image
     "paper": "plain", "paper_mm": 5.0,
     "trace_file": "", "trace_opacity": 0.5, "trace_scale": 1.0, "trace_x": 0.0, "trace_y": 0.0,
-    "trace_adjust": False, "light": False,
+    "trace_adjust": False,
+    # front light while the tablet screen runs, in percent; None leaves the tablet's own level.
+    # The tablet's level comes back when the screen hands back to the notebooks (run.sh).
+    "light_level": None,
     # pen mask (penmask.py, kept in its own file; "mask" is only the old hex form, carried over once):
     # black: the pen does nothing in Windows, grey: partly masked (mask_mode: "fade" scales the pressure
     # down, "gate" needs a firmer press). Made from an image and placed in the desktop app.
@@ -72,6 +77,7 @@ DEFAULTS = {
     # active one is what the pen and the tablet use (mask_contrast / mask_mode / mask_invert mirror it),
     # and the tablet lists them in a strip on the side away from the shortcut panel
     "masks": None, "mask_active": "", "mask_panel": True,
+    "mask_side": "right",      # which side of the tablet the strip is on, inside a panel on that side
     "mask_strip_open": False,  # the strip folds away to a corner tab; picking a mask folds it again
     "swipe_step": 100,      # three-finger swipe: tablet pixels of drag per undo / redo step (~11 mm)
     "rotate_keys": "r",     # five-finger twist: key held while dragging in a circle (Photoshop R; Krita shift+space)
@@ -96,6 +102,19 @@ DEFAULT_BUTTONS = [
 # a saved copy of that untouched layout moves to the new default.
 OLD_DEFAULT_BUTTONS = DEFAULT_BUTTONS[:-1] + [{"t": "Clear", "kind": "clear", "keys": ""}]
 DEFAULTS["panel_buttons"] = DEFAULT_BUTTONS
+# the right-hand panel: selections, layers and the screen extras, so the two panels don't repeat
+DEFAULT_BUTTONS_RIGHT = [
+    {"t": "Move", "kind": "shortcut", "keys": "v"}, {"t": "Lasso", "kind": "shortcut", "keys": "l"},
+    {"t": "Transform", "kind": "shortcut", "keys": "ctrl+t"}, {"t": "Deselect", "kind": "shortcut", "keys": "ctrl+d"},
+    {"t": "Select all", "kind": "shortcut", "keys": "ctrl+a"}, {"t": "Invert sel", "kind": "shortcut", "keys": "ctrl+shift+i"},
+    {"t": "New layer", "kind": "shortcut", "keys": "ctrl+shift+alt+n"}, {"t": "Merge down", "kind": "shortcut", "keys": "ctrl+e"},
+    {"t": "Copy", "kind": "shortcut", "keys": "ctrl+c"}, {"t": "Paste", "kind": "shortcut", "keys": "ctrl+v"},
+    {"t": "Swap col", "kind": "shortcut", "keys": "x"}, {"t": "Fill", "kind": "shortcut", "keys": "g"},
+    {"t": "Rotate", "kind": "hold", "keys": "r"}, {"t": "Reset col", "kind": "shortcut", "keys": "d"},
+    {"t": "Move image", "kind": "trace", "keys": ""}, {"t": "Light", "kind": "light", "keys": ""},
+]
+DEFAULTS["panel_buttons_right"] = DEFAULT_BUTTONS_RIGHT
+PANEL_SIDES = ("left", "right", "both", "off")
 # Tap gestures on the drawing area: "fingers x taps" -> title and keys ("" = nothing).
 # Ctrl+Shift+Alt+N is Photoshop's "new layer" without the dialog.
 TAP_SLOTS = {"1x2": "One finger, double tap", "1x3": "One finger, triple tap", "2x1": "Two-finger tap",
@@ -127,8 +146,10 @@ def clean_profiles(profiles, current=None):
         p = p if isinstance(p, dict) else {}
         name = " ".join(str(p.get("name") or "").split())[:24] or f"Profile {i + 1}"
         touch = p.get("touch") if p.get("touch") in TOUCH_MODES else "shortcuts"
-        out.append({"name": name, "buttons": clean_buttons(p.get("buttons")), "touch": touch})
-    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS), "touch": "shortcuts"}]
+        out.append({"name": name, "buttons": clean_buttons(p.get("buttons")),
+                    "buttons_right": clean_buttons(p.get("buttons_right") or DEFAULT_BUTTONS_RIGHT), "touch": touch})
+    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS),
+                    "buttons_right": clean_buttons(DEFAULT_BUTTONS_RIGHT), "touch": "shortcuts"}]
 
 
 def load_profiles(cfg):
@@ -136,6 +157,7 @@ def load_profiles(cfg):
     cfg["panel_profiles"] = clean_profiles(cfg.get("panel_profiles"), cfg.get("panel_buttons"))
     cfg["panel_profile"] = max(0, min(int(cfg.get("panel_profile") or 0), len(cfg["panel_profiles"]) - 1))
     cfg["panel_buttons"] = cfg["panel_profiles"][cfg["panel_profile"]]["buttons"]
+    cfg["panel_buttons_right"] = cfg["panel_profiles"][cfg["panel_profile"]]["buttons_right"]
 
 
 def clean_buttons(btns):
@@ -336,17 +358,29 @@ class Companion:
             self.trace_sent = key
         return remote
 
-    def light(self, on):
-        """Front light to full, or back to what it was when the screen was taken over
-        (run.sh saved that, and puts it back itself however the session ends)."""
+    def light(self, pct=None):
+        """Set the front light to pct percent (None: leave it) and return the level it is at now,
+        in percent, or None if it can't be read. run.sh saved the notebook level at the start and
+        puts it back itself however the session ends."""
         if not self.tab:
-            return
-        cmd = (f"cat {FRONTLIGHT}/max_brightness > {FRONTLIGHT}/brightness" if on else
-               f"[ -f /tmp/rmpp-companion.lock/light ] && cat /tmp/rmpp-companion.lock/light > {FRONTLIGHT}/brightness")
+            return None
+        cmd = ""
+        if pct is not None:
+            pct = max(0, min(100, int(pct)))
+            cmd = (f"m=$(cat {FRONTLIGHT}/max_brightness) && "
+                   f"echo $(( (m * {pct} + 50) / 100 )) > {FRONTLIGHT}/brightness; "
+                   # bl_power 0 = lit, 4 = powered down; brightness does nothing while powered down
+                   f"echo {0 if pct > 0 else 4} > {FRONTLIGHT}/bl_power; ")
         try:
-            self.tab.run(cmd)
+            _, out, _ = self.tab.run(cmd + f"cat {FRONTLIGHT}/brightness {FRONTLIGHT}/max_brightness "
+                                     f"{FRONTLIGHT}/bl_power")
+            v = [int(x) for x in out.split()[:3]]
+            now, top = v[0], v[1]
+            if len(v) > 2 and v[2] != 0:
+                return 0  # powered down: dark whatever brightness says
+            return round(100 * now / top) if top > 0 else None
         except Exception:
-            pass
+            return None
 
     @property
     def running(self):
@@ -388,8 +422,8 @@ class Companion:
         if "first frame drawn" in line:
             self.engine.refresh_mapper()  # the side panel now takes part of the tablet
             self.engine.sync_companion()
-            if self.engine.cfg.get("light") and self.engine.model.frontlight:
-                threading.Thread(target=self.light, args=(True,), daemon=True).start()
+            if self.engine.model.frontlight:
+                threading.Thread(target=self.engine.apply_light, daemon=True).start()
             self.engine.changed()
         if line == "companion: closed":
             self.engine.mouse.end()
@@ -568,6 +602,8 @@ class Engine:
         if self.cfg.get("panel_buttons") == OLD_DEFAULT_BUTTONS:
             self.cfg["panel_buttons"] = DEFAULT_BUTTONS
         load_profiles(self.cfg)
+        if "mask_side" not in saved.get("gui", {}):  # it used to sit opposite the one panel
+            self.cfg["mask_side"] = "left" if self.cfg.get("panel") == "right" else "right"
         if self.cfg.get("palm_size") == 28:  # first guess, in raw units; Qt reports ~0.75 of that
             self.cfg["palm_size"] = 20
         self.calibration = saved.get("calibration")
@@ -578,6 +614,8 @@ class Engine:
         self.info = self.pen = None
         self.set_model(devices.MODELS.get(self.cfg.get("model"), devices.DEFAULT))
         self.worker = None
+        self.light_now = None   # front light in percent while the tablet screen runs, once known
+        self.light_back = 85    # where a Light panel button goes back to from full
         self.companion = Companion(self)
         self.output_on = False
         self.cal = None  # {"mode", "taps"} while calibrating
@@ -624,7 +662,8 @@ class Engine:
 
     def snapshot(self):
         c = self.calibration or {}
-        mon = [{"index": i, "label": f"Display {i + 1}{' (main)' if i == 0 else ''}  {r[2] - r[0]}×{r[3] - r[1]}"}
+        mon = [{"index": i, "label": f"Display {i + 1}{' (main)' if i == 0 else ''}  {r[2] - r[0]}×{r[3] - r[1]}",
+                "w": r[2] - r[0], "h": r[3] - r[1]}
                for i, r in enumerate(self.monitors)]
         cal = None
         if c:
@@ -641,11 +680,12 @@ class Engine:
         return {
             "cfg": self.cfg, "touch_mode": self.touch_mode(), "status": {"kind": self.status[0], "text": self.status[1]},
             "link": self.link, "ssh": self.ssh_port, "connected": self.connected, "via": self.via,
-            "output": self.output_on, "screen": self.companion.running,
+            "output": self.output_on, "screen": self.companion.running, "light": self.light_now,
             "device": self.pen and {"name": self.pen["name"], "kernel": self.info.get("release", ""),
                                     "tilt": "TILT_X" in self.pen["abs"]},
             "model": {"key": self.model.key, "name": self.model.name, "verified": self.model.verified,
-                      "frontlight": self.model.frontlight, "developer_mode": self.model.developer_mode},
+                      "frontlight": self.model.frontlight, "developer_mode": self.model.developer_mode,
+                      "px_per_mm": self.model.px_per_mm},
             "monitors": mon, "calibration": cal, "calibrating": calibrating, "cal_result": self.cal_result,
             "cal_modes": {k: v["label"] for k, v in CAL_MODES.items()},
             "rotations": list(ROTATIONS), "aspect": self.mapper.oriented_aspect(),
@@ -655,7 +695,9 @@ class Engine:
             "snap_last": self.snap_last, "last_action": self.last_action, "held_keys": sorted(self.keys.held),
             "view": self.view_size(), "panel_px": PANEL_PX, "tab_px": TAB_PX,
             "key_names": sorted(keys.VK), "key_labels": keys.LABEL, "default_buttons": DEFAULT_BUTTONS,
+            "default_buttons_right": DEFAULT_BUTTONS_RIGHT,
             "pen_rate": self.rate.last, "mask_ver": self.pmask.ver, "mask_pct": round(100 * self.pmask.coverage()),
+            "gesture_list": self.gesture_list(), "trace_key": self.trace_key(), "mask_vers": {k: m.ver for k, m in self.masks.items()},
             "strip_px": STRIP_PX, "strip_side": self.strip_side(), "strip_shown": bool(self.strip_frac()), "tap_slots": TAP_SLOTS, "taps": clean_taps(self.cfg.get("taps")),
         }
 
@@ -686,18 +728,20 @@ class Engine:
         with self.lock:
             if key not in DEFAULTS:
                 raise KeyError(key)
-            if key == "panel_buttons":
+            if key in ("panel_buttons", "panel_buttons_right"):
                 val = clean_buttons(val)
                 profs = [dict(p) for p in self.cfg["panel_profiles"]]
-                profs[self.cfg["panel_profile"]]["buttons"] = val
+                profs[self.cfg["panel_profile"]]["buttons" if key == "panel_buttons" else "buttons_right"] = val
                 self.cfg["panel_profiles"] = profs
             if key == "panel_profiles":
                 val = clean_profiles(val, self.cfg.get("panel_buttons"))
                 self.cfg["panel_profile"] = min(self.cfg["panel_profile"], len(val) - 1)
                 self.cfg["panel_buttons"] = val[self.cfg["panel_profile"]]["buttons"]
+                self.cfg["panel_buttons_right"] = val[self.cfg["panel_profile"]]["buttons_right"]
             if key == "panel_profile":
                 val = int(val) % len(self.cfg["panel_profiles"])
                 self.cfg["panel_buttons"] = self.cfg["panel_profiles"][val]["buttons"]
+                self.cfg["panel_buttons_right"] = self.cfg["panel_profiles"][val]["buttons_right"]
                 self.keys.release_all()  # a held key belongs to the old layout's buttons
             if key == "taps":
                 val = clean_taps(val)
@@ -708,6 +752,10 @@ class Engine:
                     val = DEFAULTS["rotate_keys"]
             if key == "swipe_step":
                 val = max(40, min(400, int(val)))
+            if key == "panel" and val not in PANEL_SIDES:
+                val = "left"
+            if key == "mask_side" and val not in ("left", "right"):
+                val = "right"
             if key == "paper" and val not in PAPERS:
                 val = "plain"
             if key == "paper_mm":
@@ -738,42 +786,70 @@ class Engine:
                 self.pmask.set_contrast(self.cfg["mask_contrast"], self.cfg["mask_invert"])
             self.refresh_mapper()
             self.save()
-        if key in ("companion_rot", "panel", "panel_open", "mask_panel", "mask_strip_open"):
+        if key in ("companion_rot", "panel", "panel_open", "panel_open_right", "mask_panel", "mask_strip_open", "mask_side"):
             self.refresh_mapper()
-        if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open",
-                   "panel_buttons", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
+        if key in ("area", "companion_rot", "trail_ms", "output", "snap", "panel", "panel_open", "panel_open_right",
+                   "panel_buttons", "panel_buttons_right", "mask_side", "gestures", "swipe_step", "palm_size", "panel_profiles", "panel_profile",
                    "paper", "paper_mm", "trace_file", "trace_opacity", "trace_scale", "trace_x", "trace_y",
-                   "trace_adjust", "light", "mask_on", "mask_invert", "mask_panel", "mask_strip_open"):
+                   "trace_adjust", "mask_on", "mask_invert", "mask_panel", "mask_strip_open",
+                   "taps"):
             self.sync_companion()
         if key in ("mask_contrast", "mask_invert"):
             self.push_mask()
             self.push_strip()
-        if key == "light" and self.companion.running and self.model.frontlight:
-            threading.Thread(target=self.companion.light, args=(bool(val),), daemon=True).start()
-            self.companion.send("toast Front light: " + ("full" if val else "back to your level"))
         if key == "panel_profile" and self.companion.running:
             self.companion.send("unlatch")
-            self.companion.send("toast " + self.cfg["panel_profiles"][self.cfg["panel_profile"]]["name"])
         if key == "tilt" and self.worker and self.worker.translator and self.pen:
             self.worker.translator.has_tilt = bool(val) and "TILT_X" in self.pen["abs"]
         self.changed()
+
+    # ---- for the desktop app's picture of the tablet screen
+    def trace_key(self):
+        """Names the tracing image's current file version, so the page knows to fetch it again."""
+        path = self.cfg.get("trace_file") or ""
+        try:
+            st = os.stat(path)
+        except OSError:
+            return ""
+        return f"{path}|{st.st_mtime}|{st.st_size}" if st.st_size <= TRACE_MAX_BYTES else ""
+
+    def trace_image(self):
+        """The tracing image as a data URL (as the tablet gets it: the file itself), or None."""
+        path = self.cfg.get("trace_file") or ""
+        if not self.trace_key():
+            return None
+        ext = os.path.splitext(path)[1].lower().lstrip(".")
+        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "gif": "gif", "bmp": "bmp", "webp": "webp"}.get(ext, "png")
+        with open(path, "rb") as f:
+            return f"data:image/{mime};base64," + base64.b64encode(f.read()).decode("ascii")
+
+    def mask_thumbs(self):
+        """Each mask's thumbnail for the tablet's mask strip, as data URLs by mask id."""
+        return {k: "data:image/png;base64," + base64.b64encode(m.thumb()).decode("ascii") for k, m in self.masks.items()}
 
     def view_size(self):
         """The tablet screen as it sits on the desk, in panel pixels (width, height)."""
         w, h = self.model.screen
         return (h, w) if self.companion_rotation() % 2 else (w, h)
 
-    def panel_shown(self):
-        return (self.cfg.get("panel", "left") != "off" and self.companion.running and self.cal is None)
+    def panel_shown(self, side=None):
+        """Is a shortcut panel on this side (either side if None) of the tablet screen?"""
+        if not (self.companion.running and self.cal is None):
+            return False
+        p = self.cfg.get("panel", "left")
+        return p != "off" if side is None else p in (side, "both")
 
-    def panel_frac(self):
-        """Share of the tablet (across, as it sits) the open side panel takes, or 0."""
-        if not self.panel_shown() or not self.cfg.get("panel_open", True):
+    def panel_open(self, side):
+        return bool(self.cfg.get("panel_open" if side == "left" else "panel_open_right", True))
+
+    def panel_frac(self, side="left"):
+        """Share of the tablet (across, as it sits) the open panel on this side takes, or 0."""
+        if not self.panel_shown(side) or not self.panel_open(side):
             return 0.0
         return PANEL_PX / self.view_size()[0]
 
     def strip_side(self):
-        return "left" if self.cfg.get("panel") == "right" else "right"
+        return "left" if self.cfg.get("mask_side") == "left" else "right"
 
     def strip_avail(self):
         """Is the mask strip there at all (open, or folded to its corner tab)?"""
@@ -781,23 +857,30 @@ class Engine:
                     and self.cal is None)
 
     def strip_frac(self):
-        """Share of the tablet the open mask strip takes (opposite the panel), or 0."""
+        """Share of the tablet the open mask strip takes, or 0."""
         if not self.strip_avail() or not self.cfg.get("mask_strip_open"):
             return 0.0
         return STRIP_PX / self.view_size()[0]
 
+    def strip_offset(self):
+        """How far in from its edge the strip (and its corner tab) starts, in view pixels: past an
+        open panel on that side, or past a folded panel's tab."""
+        side = self.strip_side()
+        if not self.panel_shown(side):
+            return 0
+        return PANEL_PX if self.panel_open(side) else TAB_PX
+
+    def side_reserved(self, side):
+        """Share of the tablet on this side that the panel and strip keep from the pen."""
+        w = self.view_size()[0]
+        if self.strip_side() == side and self.strip_frac():
+            return (self.strip_offset() + STRIP_PX) / w
+        return self.panel_frac(side)
+
     def effective_area(self):
         a = list(self.cfg["area"])
-        f = self.panel_frac()
-        if f and self.cfg.get("panel") == "right":
-            a[2] = min(a[2], 1 - f)
-        elif f:
-            a[0] = max(a[0], f)
-        g = self.strip_frac()
-        if g and self.strip_side() == "right":
-            a[2] = min(a[2], 1 - g)
-        elif g:
-            a[0] = max(a[0], g)
+        a[0] = max(a[0], self.side_reserved("left"))
+        a[2] = min(a[2], 1 - self.side_reserved("right"))
         if a[2] - a[0] < 0.1:
             a = list(self.cfg["area"])
         return a
@@ -997,31 +1080,47 @@ class Engine:
         return dataclasses.replace(s, pressure=int(round(lo + n * span)))
 
     def over_panel(self, s):
-        """Is the pen above the tablet's side panel or mask strip? Then it works those, not Windows."""
+        """Is the pen above a side panel, a fold tab or the mask strip? Then it works those, not Windows."""
         if not s.in_range or not self.mapper:
             return False
-        if self.strip_avail():
-            p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
-            g, right = self.strip_frac(), self.strip_side() == "right"
-            if g and ((p > 1 - g) if right else (p < g)):
-                return True
-            w, h = self.view_size()
-            if not g and q < TAB_PX / h and ((p > 1 - TAB_PX / w) if right else (p < TAB_PX / w)):
-                return True  # the folded strip's corner tab
-        if not self.panel_shown():
-            return False
         p, q = self.mapper.oriented(*self.mapper.uv(s.x, s.y))
-        right = self.cfg.get("panel") == "right"
-        f = self.panel_frac()
-        if f:
-            return p > 1 - f if right else p < f
-        # folded: only the small tab in the top corner is left
         w, h = self.view_size()
-        tx, ty = TAB_PX / w, TAB_PX / h
-        return q < ty and (p > 1 - tx if right else p < tx)
+        y = q * h
+        for side in ("left", "right"):
+            x = p * w if side == "left" else (1 - p) * w  # view pixels in from this side's edge
+            if self.panel_shown(side):
+                if x < (PANEL_PX if self.panel_open(side) else TAB_PX) and (self.panel_open(side) or y < TAB_PX):
+                    return True
+            if self.strip_avail() and self.strip_side() == side:
+                off = self.strip_offset()
+                if self.strip_frac():
+                    if off <= x < off + STRIP_PX:
+                        return True
+                elif off <= x < off + TAB_PX and y < TAB_PX:
+                    return True  # the folded strip's corner tab
+        return False
 
     def buttons(self):
-        return clean_buttons(self.cfg.get("panel_buttons") or DEFAULT_BUTTONS)
+        """Both panels' buttons as the tablet numbers them: 0-15 left, 16-31 right."""
+        return (clean_buttons(self.cfg.get("panel_buttons") or DEFAULT_BUTTONS)
+                + clean_buttons(self.cfg.get("panel_buttons_right") or DEFAULT_BUTTONS_RIGHT))
+
+    def gesture_list(self):
+        """The finger gestures as [gesture, what it does] rows: the tablet's gestures sheet and the
+        desktop app's picture of it. Taps are listed only when they have keys."""
+        if not self.cfg.get("gestures", True):
+            return []
+        if self.touch_mode() == "windows":
+            rows = [["One finger", "Touch in Windows"], ["Two fingers", "Scroll, pinch to zoom"]]
+        else:
+            rows = [["3 fingers, swipe left", "Undo"], ["3 fingers, swipe right", "Redo"],
+                    ["2 fingers, drag", "Pan the canvas"], ["2 fingers, pinch", "Zoom"]]
+            rows.append(["5 fingers, twist", "Rotate the canvas"])
+            for slot, t in clean_taps(self.cfg.get("taps")).items():
+                if t["keys"]:
+                    rows.append([TAP_SLOTS[slot], t["t"] or keys.label(t["keys"])])
+        rows.append(["5 fingers, swipe down", "Clear ink, refresh the screen"])
+        return rows
 
     def companion_buttons(self):
         """The layout as the tablet draws it: title, second line, how a press behaves."""
@@ -1083,8 +1182,9 @@ class Engine:
                 self.companion.send("toast " + (t["t"] or keys.label(t["keys"])))
         elif name in keys.SHORTCUTS:  # gestures
             self.keys.combo(keys.SHORTCUTS[name])
-        elif name == "panel":
-            self.set("panel_open", arg == "1")
+        elif name == "panel":  # a fold tab: "panel left|right 0|1" (older tablet apps: "panel 0|1")
+            side, flag = (arg, parts[2]) if len(parts) > 2 else ("left", arg)
+            self.set("panel_open" if side == "left" else "panel_open_right", flag == "1")
         elif name == "trace" and len(parts) == 4:  # the image was moved / zoomed on the tablet
             with self.lock:
                 self.cfg["trace_x"], self.cfg["trace_y"] = float(parts[1]), float(parts[2])
@@ -1107,8 +1207,13 @@ class Engine:
         elif name == "light":
             if not self.model.frontlight:
                 self.companion.send(f"toast The {self.model.name} has no front light")
-            else:
-                self.set("light", not self.cfg.get("light"))
+            else:  # a Light panel button: full, then back to the level before
+                now = self.light_now if self.light_now is not None else self.cfg.get("light_level")
+                full = now is not None and now >= 100
+                self.set_light(self.light_back if full else 100)
+                self.companion.send(f"toast Front light {self.light_now}%")
+        elif name == "lightset" and arg.isdigit():  # the light bar under the panel
+            self.set_light(int(arg), from_tablet=True)
         elif name == "profile" and arg in ("next", "prev"):
             self.set("panel_profile", self.cfg["panel_profile"] + (1 if arg == "next" else -1))
         elif name == "pen":
@@ -1336,7 +1441,7 @@ class Engine:
             threading.Thread(target=self.cable_chores, args=(self.worker.tab,), daemon=True).start()
         if self.cfg["auto_output"]:
             self.output_on = True
-        if self.cfg["auto_screen"] and self.worker:
+        if self.worker:  # the tablet screen is part of the app, not an option
             try:
                 self.companion.start(self.worker.tab)
             except Exception as ex:
@@ -1435,12 +1540,11 @@ class Engine:
         self.changed()
 
     def want_grab(self):
-        """Grab the pen away from xochitl when asked to, and always while calibrating (so taps
-        don't open its menus), but never while the tablet screen runs: xochitl is stopped then,
-        and a grab would starve the screen's own pen reader."""
-        if self.companion.running:
-            return False
-        return bool(self.cfg["grab"]) or self.cal is not None
+        """Grab the pen away from xochitl only while calibrating without the tablet screen (so
+        taps don't open its menus). Never while the screen runs: xochitl is stopped then, and a
+        grab would starve the screen's own pen reader. With the screen closed from the tablet
+        (power button), the notebooks are meant to work, so the pen is left to them."""
+        return self.cal is not None and not self.companion.running
 
     def make_pen(self):
         if sys.platform.startswith("linux"):
@@ -1472,12 +1576,35 @@ class Engine:
 
     # ------------------------------------------------------------------ tablet screen
 
-    def set_screen(self, on):
-        if on:
-            if self.worker and self.worker.tab:
-                self.companion.start(self.worker.tab)
-        else:
-            self.companion.stop()
+    def restart_screen(self):
+        """Bring the tablet screen back after it was closed on the tablet (power button) or
+        didn't start; it always starts by itself on connecting."""
+        if self.worker and self.worker.tab:
+            self.companion.start(self.worker.tab)
+        self.changed()
+
+    # ------------------------------------------------------------------ front light
+
+    def apply_light(self):
+        """On screen start: set the saved level, or read the tablet's own one."""
+        lvl = self.companion.light(self.cfg.get("light_level"))
+        self.light_now = lvl
+        if lvl is not None:
+            self.companion.send(f"light {lvl}")
+        self.changed()
+
+    def set_light(self, pct, from_tablet=False):
+        """Front light in percent. From the tablet, the screen app already set it itself."""
+        pct = max(0, min(100, int(round(float(pct)))))
+        if pct < 100:
+            self.light_back = pct
+        with self.lock:
+            self.cfg["light_level"] = pct
+            self.save()
+        self.light_now = pct
+        if not from_tablet and self.companion.running and self.model.frontlight:
+            self.companion.send(f"light {pct}")
+            threading.Thread(target=self.companion.light, args=(pct,), daemon=True).start()
         self.changed()
 
     def position(self):
@@ -1531,15 +1658,18 @@ class Engine:
         c.send(f"rot {self.companion_rotation()}")
         shown = self.panel_shown()
         c.send(f"panel {self.cfg.get('panel', 'left') if shown else 'off'} {PANEL_PX / self.view_size()[0]:.4f}")
-        c.send(f"panelopen {int(bool(self.cfg.get('panel_open', True)))}")
+        c.send(f"panelopen {int(self.panel_open('left'))} {int(self.panel_open('right'))}")
         c.send(f"gestures {int(bool(self.cfg.get('gestures', True)))} {int(self.cfg.get('swipe_step', 100))} "
                f"{float(self.cfg.get('palm_size', 0))} {int(self.touch_mode() == 'windows')}")
         c.send("buttons " + json.dumps(self.companion_buttons(), separators=(",", ":")))
+        c.send("gesturelist " + json.dumps(self.gesture_list(), separators=(",", ":")))
         profs = self.cfg["panel_profiles"]
         c.send(f"profile {self.cfg['panel_profile']} {len(profs)} {profs[self.cfg['panel_profile']]['name']}")
         c.send("area " + " ".join(f"{a:.4f}" for a in self.effective_area()))
         c.send(f"fade {int(self.cfg['trail_ms'])}")
-        c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))} light {int(bool(self.cfg.get('light')))}")
+        c.send(f"state pen {int(self.output_on)} snap {int(bool(self.cfg.get('snap')))}")
+        if self.model.frontlight and self.light_now is not None:
+            c.send(f"light {self.light_now}")
         c.send(f"paper {self.cfg.get('paper', 'plain')} {float(self.cfg.get('paper_mm', 5)) * self.model.px_per_mm:.1f}")
         try:
             remote = c.trace_remote(self.cfg.get("trace_file"))
