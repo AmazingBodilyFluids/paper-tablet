@@ -243,6 +243,22 @@ class PaperAndTrace(Profiles):
         e.set_light(250)
         self.assertEqual(e.cfg["light_level"], 100)  # clamped
 
+    def test_light_powers_the_frontlight_up(self):
+        # Seen on the device 2026-11-11: bl_power stuck at 4 (powered down), so brightness writes
+        # read back fine but nothing lit. A level above 0 must power it up, 0 powers it down.
+        class Tab:
+            def __init__(self, out): self.cmds, self.out = [], out
+            def run(self, cmd): self.cmds.append(cmd); return 0, self.out, ""
+        c = core.Companion(None)
+        c.tab = Tab("1023 2047 0")
+        self.assertEqual(c.light(50), 50)
+        self.assertIn("echo 0 > /sys/class/backlight/rm_frontlight/bl_power", c.tab.cmds[0])
+        c.light(0)
+        self.assertIn("echo 4 > /sys/class/backlight/rm_frontlight/bl_power", c.tab.cmds[1])
+        c.tab = Tab("2047 2047 4")
+        self.assertEqual(c.light(), 0)  # powered down reads as dark, not full
+        self.assertNotIn("echo", c.tab.cmds[0])
+
     def test_screen_is_not_optional(self):
         for gone in ("auto_screen", "grab", "light"):
             self.assertNotIn(gone, core.DEFAULTS)

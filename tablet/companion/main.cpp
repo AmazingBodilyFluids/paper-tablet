@@ -60,6 +60,9 @@ static void set_light(int pct) {
     if (top <= 0) return;
     snprintf(path, sizeof path, "%s/brightness", FRONTLIGHT);
     if ((f = fopen(path, "w"))) { fprintf(f, "%d\n", (top * pct + 50) / 100); fclose(f); }
+    // bl_power: 0 = lit, 4 = powered down. Brightness alone does nothing while it is powered down.
+    snprintf(path, sizeof path, "%s/bl_power", FRONTLIGHT);
+    if ((f = fopen(path, "w"))) { fprintf(f, "%d\n", pct > 0 ? 0 : 4); fclose(f); }
 }
 
 static void on_message(QtMsgType, const QMessageLogContext &, const QString &msg) {

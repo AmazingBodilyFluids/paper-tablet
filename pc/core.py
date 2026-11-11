@@ -368,10 +368,16 @@ class Companion:
         if pct is not None:
             pct = max(0, min(100, int(pct)))
             cmd = (f"m=$(cat {FRONTLIGHT}/max_brightness) && "
-                   f"echo $(( (m * {pct} + 50) / 100 )) > {FRONTLIGHT}/brightness; ")
+                   f"echo $(( (m * {pct} + 50) / 100 )) > {FRONTLIGHT}/brightness; "
+                   # bl_power 0 = lit, 4 = powered down; brightness does nothing while powered down
+                   f"echo {0 if pct > 0 else 4} > {FRONTLIGHT}/bl_power; ")
         try:
-            _, out, _ = self.tab.run(cmd + f"cat {FRONTLIGHT}/brightness {FRONTLIGHT}/max_brightness")
-            now, top = (int(v) for v in out.split()[:2])
+            _, out, _ = self.tab.run(cmd + f"cat {FRONTLIGHT}/brightness {FRONTLIGHT}/max_brightness "
+                                     f"{FRONTLIGHT}/bl_power")
+            v = [int(x) for x in out.split()[:3]]
+            now, top = v[0], v[1]
+            if len(v) > 2 and v[2] != 0:
+                return 0  # powered down: dark whatever brightness says
             return round(100 * now / top) if top > 0 else None
         except Exception:
             return None
