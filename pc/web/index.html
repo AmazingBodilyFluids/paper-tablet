@@ -119,8 +119,11 @@
           <div class="pane">
             <div class="pane-title">Pen mask</div>
             <div class="prof-row">
-              <select class="input" id="maskSel" title="Your masks: switch between them here or from the corner tab on the tablet"></select>
-              <input class="input" id="maskName" maxlength="24" placeholder="Mask name" title="Rename this mask">
+              <div class="combo" id="maskCombo">
+                <input class="input" id="maskName" maxlength="24" placeholder="None" title="Click the name to rename this mask" autocomplete="off" spellcheck="false">
+                <button class="combo-btn" id="maskChev" type="button" title="Your masks: switch between them here or from the corner tab on the tablet" aria-haspopup="listbox" aria-expanded="false"></button>
+                <div class="combo-list" id="maskList" role="listbox" hidden></div>
+              </div>
               <button class="btn" onclick="$('#maskFile').click()" title="A new mask from an image, read in greyscale: black masks, white stays open">Add mask</button><input type="file" id="maskFile" accept="image/*" hidden onchange="maskFromImage(this)">
               <button class="btn ghost" id="maskDel">Delete</button>
             </div>

@@ -349,7 +349,21 @@ ol.steps li .sub { color:var(--dim2); font-size:12px; margin-top:2px; }
 
 .prof-row { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
 .prof-row select { flex:1 1 110px; min-width:90px; }
-.prof-row #profName, .prof-row #maskName { flex:1 1 110px; min-width:90px; }
+.prof-row #profName { flex:1 1 110px; min-width:90px; }
+/* one field: the name (click to rename) and a chevron that opens the list */
+.combo { position:relative; flex:2 1 200px; min-width:160px; }
+.combo .input { padding-right:38px; }
+.combo .input[readonly] { cursor:pointer; color:var(--dim); }
+.combo-btn { position:absolute; top:1px; right:1px; bottom:1px; width:34px; border-radius:0 var(--radius) var(--radius) 0; cursor:pointer;
+  background-image:linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position:calc(50% - 2.5px) 52%, calc(50% + 2.5px) 52%; background-size:5px 5px; background-repeat:no-repeat; }
+.combo-btn:hover, .combo-btn[aria-expanded="true"] { background-color:var(--s3); }
+.combo-list { position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:30; max-height:260px; overflow:auto;
+  background:var(--s2); border:1px solid var(--border2); border-radius:var(--radius); padding:4px; box-shadow:0 8px 24px rgba(0,0,0,0.4); }
+.combo-list div { padding:7px 10px; border-radius:var(--radius); cursor:pointer; font-size:13px; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.combo-list div:hover, .combo-list div.hl { background:var(--s4); }
+.combo-list div.on { color:var(--accent); }
 .pm-prof { position:absolute; border:solid #000; background:#fff; box-sizing:border-box; display:flex;
   align-items:center; justify-content:center; font-weight:700; color:#000; }
 .pm-prof span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }

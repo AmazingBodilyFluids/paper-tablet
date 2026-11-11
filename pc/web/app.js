@@ -1911,19 +1911,48 @@ async function resetTrace() {
 
 // the mask library: pick, name, add, delete (the tablet's strip switches between the same masks)
 function renderMasks() {
-  const ms = S.cfg.masks || [], cur = S.cfg.mask_active || "", sel = $("#maskSel");
+  const ms = S.cfg.masks || [], cur = S.cfg.mask_active || "", list = $("#maskList");
   const sig = JSON.stringify([ms.map(m => [m.id, m.name]), cur]);
-  if (sel.dataset.sig !== sig && document.activeElement !== sel) {
-    sel.dataset.sig = sig;
-    sel.innerHTML = `<option value=""${cur ? "" : " selected"}>None</option>` +
-      ms.map(m => `<option value="${esc(m.id)}"${m.id === cur ? " selected" : ""}>${esc(m.name)}</option>`).join("");
+  if (list.dataset.sig !== sig) {
+    list.dataset.sig = sig;
+    list.innerHTML = [{ id: "", name: "None" }, ...ms].map(m =>
+      `<div role="option" data-id="${esc(m.id)}" class="${m.id === cur ? "on" : ""}" aria-selected="${m.id === cur}">${esc(m.name)}</div>`).join("");
   }
-  const m = ms.find(x => x.id === cur);
-  if (document.activeElement !== $("#maskName")) $("#maskName").value = m ? m.name : "";
-  $("#maskName").disabled = $("#maskDel").disabled = !m;
+  const m = ms.find(x => x.id === cur), name = $("#maskName");
+  if (document.activeElement !== name) name.value = m ? m.name : "";
+  name.readOnly = !m;  // None: nothing to rename, a click opens the list instead
+  $("#maskDel").disabled = !m;
 }
-$("#maskSel").onchange = async e => { await api().pick_mask(e.target.value); maskSrc = null; if (e.target.value) Scr.setDrag("mask"); refresh(); };
-$("#maskName").onchange = async e => { if (S.cfg.mask_active) await api().rename_mask(S.cfg.mask_active, e.target.value); refresh(); };
+// The mask field: the name is the active mask's, renamed in place; the chevron opens the list.
+const MaskCombo = {
+  open(on = $("#maskList").hidden) {
+    $("#maskList").hidden = !on;
+    $("#maskChev").setAttribute("aria-expanded", on);
+    if (on) for (const d of $$("#maskList div")) d.classList.toggle("hl", false);
+  },
+  async pick(id) {
+    this.open(false);
+    if (id === (S.cfg.mask_active || "")) return;
+    await api().pick_mask(id); maskSrc = null;
+    if (id) Scr.setDrag("mask");
+    refresh();
+  },
+};
+$("#maskChev").onclick = e => { e.stopPropagation(); MaskCombo.open(); };
+$("#maskList").onclick = e => { const d = e.target.closest("[data-id]"); if (d) MaskCombo.pick(d.dataset.id); };
+$("#maskName").onclick = e => { if (e.target.readOnly) { e.stopPropagation(); MaskCombo.open(); } else MaskCombo.open(false); };
+$("#maskName").onkeydown = e => {
+  if (e.key === "Enter") e.target.blur();
+  else if (e.key === "Escape") { const m = (S.cfg.masks || []).find(x => x.id === S.cfg.mask_active); e.target.value = m ? m.name : ""; e.target.blur(); }
+  else if (e.key === "ArrowDown" && e.altKey) { e.preventDefault(); MaskCombo.open(true); }
+};
+$("#maskName").onchange = async e => {
+  const v = e.target.value.trim();
+  if (S.cfg.mask_active && v) await api().rename_mask(S.cfg.mask_active, v);
+  refresh();
+};
+document.addEventListener("click", e => { if (!e.target.closest("#maskCombo")) MaskCombo.open(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#maskList").hidden) MaskCombo.open(false); });
 {
   let armed = 0;
   $("#maskDel").onclick = async () => {  // two clicks, so a stray one can't lose a mask
