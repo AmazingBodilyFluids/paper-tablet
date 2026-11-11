@@ -1,7 +1,11 @@
 """Panel buttons, key combinations and tablet actions (no Windows, no tablet needed)."""
 import threading
+import time
 import types
 import base64
+import os
+import shutil
+import tempfile
 import unittest
 import zlib
 
@@ -92,6 +96,7 @@ def bare_engine(cfg=None):
     e.set_output = lambda on: e.settings.append(("output", on))
     e.companion = types.SimpleNamespace(running=True)
     e.cal = None
+    e.light_now, e.light_back = None, 85
     e.companion_rotation = lambda: 3
     return e
 
@@ -157,6 +162,15 @@ class TabletActions(unittest.TestCase):
         e.tablet_action("snap 0")
         self.assertEqual(e.settings, [("panel_open", False), ("output", True), ("snap", False)])
 
+    def test_right_panel_buttons_and_fold(self):
+        e = bare_engine({"panel": "both", "panel_buttons_right": [{"t": "Copy", "kind": "shortcut", "keys": "ctrl+c"}]})
+        e.tablet_action("press 16")  # the right panel's first button
+        self.assertEqual([vk for vk, up in e.sent if not up], [0x11, 0x43])
+        e.tablet_action("panel right 0")
+        e.tablet_action("panel left 1")
+        self.assertEqual(e.settings, [("panel_open_right", False), ("panel_open", True)])
+        self.assertEqual(len(e.companion_buttons()), 2 * core.PANEL_SLOTS)
+
 
 class Profiles(unittest.TestCase):
     def engine(self, cfg=None):
@@ -168,7 +182,7 @@ class Profiles(unittest.TestCase):
         e.worker = None
         e.companion = types.SimpleNamespace(running=True, lines=[])
         e.companion.send = e.companion.lines.append
-        e.companion.light = lambda on: None
+        e.companion.light = lambda pct=None: pct
         return e
 
     def test_old_layout_becomes_first_profile(self):
@@ -176,7 +190,7 @@ class Profiles(unittest.TestCase):
         e = self.engine({"panel_buttons": mine})
         self.assertEqual(len(e.cfg["panel_profiles"]), 1)
         self.assertEqual(e.cfg["panel_profiles"][0]["buttons"], mine)
-        self.assertEqual(e.buttons(), mine)
+        self.assertEqual(e.buttons()[:core.PANEL_SLOTS], mine)
 
     def test_cycle_switches_buttons_and_wraps(self):
         a = core.clean_buttons([{"t": "A", "kind": "shortcut", "keys": "a"}])
@@ -188,7 +202,8 @@ class Profiles(unittest.TestCase):
         e.tablet_action("profile next")
         self.assertEqual(e.cfg["panel_profile"], 1)
         self.assertEqual(e.keys.held, set())  # held keys let go on a switch
-        self.assertIn("toast Krita", e.companion.lines)
+        self.assertIn("unlatch", e.companion.lines)
+        self.assertNotIn("toast Krita", e.companion.lines)  # the profile row shows the name already
         e.tablet_action("press 0")
         self.assertEqual(e.keys.held, {"b"})
         e.tablet_action("profile next")
@@ -217,9 +232,52 @@ class PaperAndTrace(Profiles):
         e.tablet_action("trace 120.5 -40 2.5")
         self.assertEqual((e.cfg["trace_x"], e.cfg["trace_y"], e.cfg["trace_scale"]), (120.5, -40.0, 2.5))
         e.tablet_action("traceadjust")
-        e.tablet_action("light")
         self.assertTrue(e.cfg["trace_adjust"])
-        self.assertTrue(e.cfg["light"])
+
+    def test_paper_tile_in_the_mask_strip(self):
+        e = self.engine()
+        e.tablet_action("paper squared")
+        self.assertEqual(e.cfg["paper"], "squared")
+        e.tablet_action("paper wallpaper")  # not a paper: ignored
+        self.assertEqual(e.cfg["paper"], "squared")
+
+    def test_light_bar_and_light_button(self):
+        e = self.engine()
+        e.tablet_action("lightset 60")  # the bar under the panel: the tablet set it already
+        self.assertEqual((e.cfg["light_level"], e.light_now), (60, 60))
+        self.assertNotIn("light 60", e.companion.lines)
+        e.tablet_action("light")        # a Light button: full ...
+        self.assertEqual(e.cfg["light_level"], 100)
+        self.assertIn("light 100", e.companion.lines)
+        e.tablet_action("light")        # ... and back to where it was
+        self.assertEqual(e.cfg["light_level"], 60)
+        e.set_light(250)
+        self.assertEqual(e.cfg["light_level"], 100)  # clamped
+
+    def test_light_powers_the_frontlight_up(self):
+        # Seen on the device 2026-11-11: bl_power stuck at 4 (powered down), so brightness writes
+        # read back fine but nothing lit. A level above 0 must power it up, 0 powers it down.
+        class Tab:
+            def __init__(self, out): self.cmds, self.out = [], out
+            def run(self, cmd): self.cmds.append(cmd); return 0, self.out, ""
+        c = core.Companion(None)
+        c.tab = Tab("1023 2047 0")
+        self.assertEqual(c.light(50), 50)
+        self.assertIn("echo 0 > /sys/class/backlight/rm_frontlight/bl_power", c.tab.cmds[0])
+        c.light(0)
+        self.assertIn("echo 4 > /sys/class/backlight/rm_frontlight/bl_power", c.tab.cmds[1])
+        c.tab = Tab("2047 2047 4")
+        self.assertEqual(c.light(), 0)  # powered down reads as dark, not full
+        self.assertNotIn("echo", c.tab.cmds[0])
+
+    def test_screen_is_not_optional(self):
+        for gone in ("auto_screen", "grab", "light"):
+            self.assertNotIn(gone, core.DEFAULTS)
+        e = self.engine()
+        e.companion.running = False
+        self.assertFalse(e.want_grab())  # closed on the tablet: the notebooks get the pen
+        e.cal = {"mode": "sheet9", "taps": []}
+        self.assertTrue(e.want_grab())   # calibrating without the screen: keep taps off xochitl
 
     def test_values_are_clamped(self):
         e = self.engine()
@@ -334,6 +392,30 @@ class TraceMask(Profiles):
         e.rename_mask(b, "  Ruler  ")
         self.assertEqual(e.cfg["masks"], [{"id": b, "name": "Ruler", "contrast": 1.0, "mode": "fade", "invert": False}])
 
+    def test_a_mask_keeps_its_image_and_place(self):
+        e = self.masked_engine()
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        e.mask_src_path = lambda mid: os.path.join(d, f"{mid}-src.png")
+        e.save = lambda: None
+        a = e.new_mask("Circle")
+        self.assertIsNone(e.mask_source())                      # no image yet
+        with self.assertRaises(ValueError):
+            e.set_mask_source("data:text/html;base64," + base64.b64encode(b"<b>").decode())
+        png = b"\x89PNG\r\n\x1a\n" + b"x" * 20
+        self.assertTrue(e.set_mask_source("data:image/png;base64," + base64.b64encode(png).decode()))
+        lv = base64.b64encode(bytes(self.N * self.N)).decode()
+        e.set_mask(lv, {"s": 0.5, "ox": 0.25, "oy": -0.1})
+        m = e.mask_source()
+        self.assertEqual((m["s"], m["ox"], m["oy"]), (0.5, 0.25, -0.1))
+        self.assertEqual(base64.b64decode(m["url"].split(",", 1)[1]), png)
+        e.set_mask(lv, {"s": 0, "ox": 99, "oy": 0})              # kept in sensible bounds
+        self.assertEqual((e.mask_source()["s"], e.mask_source()["ox"]), (0.05, 20.0))
+        e.mask_op("clear")                                      # cleared: the cells no longer come from the image
+        self.assertIsNone(e.mask_source())
+        e.delete_mask(a)
+        self.assertFalse(os.path.exists(os.path.join(d, f"{a}-src.png")))
+
     def test_old_hex_masks_carry_over(self):
         old = "8" + "0" * (72 * 72 // 4 - 1)  # 1-bit format: only the first cell set
         lv = penmask.legacy(old)
@@ -375,9 +457,40 @@ class PanelGeometry(unittest.TestCase):
         self.assertFalse(e.over_panel(self.pen(0.1, 0.02)))
 
     def test_right_panel_tab_is_top_right(self):
-        e = self.engine(panel="right", panel_open=False)
+        e = self.engine(panel="right", panel_open_right=False)
         self.assertTrue(e.over_panel(self.pen(0.99, 0.02)))
         self.assertFalse(e.over_panel(self.pen(0.01, 0.02)))
+
+    def test_both_panels_fold_on_their_own(self):
+        e = self.engine(panel="both", panel_open=True, panel_open_right=False)
+        f = core.PANEL_PX / 2160
+        self.assertAlmostEqual(e.panel_frac("left"), f)
+        self.assertEqual(e.panel_frac("right"), 0)
+        self.assertEqual(e.effective_area()[:3:2], [f, 1.0])
+        self.assertTrue(e.over_panel(self.pen(f / 2, 0.5)))      # left, open
+        self.assertTrue(e.over_panel(self.pen(0.99, 0.02)))      # right, folded: its tab
+        self.assertFalse(e.over_panel(self.pen(0.99, 0.5)))
+
+    def test_mask_strip_sits_inside_a_panel_on_its_side(self):
+        e = self.engine(panel="both", panel_open=True, panel_open_right=True, mask_side="right",
+                        masks=[{"id": "a"}], mask_strip_open=True)
+        w, P, M = 2160, core.PANEL_PX, core.STRIP_PX
+        self.assertEqual(e.strip_offset(), P)
+        self.assertAlmostEqual(e.effective_area()[2], 1 - (P + M) / w)
+        self.assertTrue(e.over_panel(self.pen(1 - (P + M / 2) / w, 0.5)))   # in the strip
+        e.cfg["panel_open_right"] = False                                   # folded: past its tab
+        self.assertEqual(e.strip_offset(), core.TAB_PX)
+        e.cfg["mask_strip_open"] = False                                    # strip folded: only its tab
+        x = 1 - (core.TAB_PX + core.TAB_PX / 2) / w
+        self.assertTrue(e.over_panel(self.pen(x, 0.01)))
+        self.assertFalse(e.over_panel(self.pen(x, 0.5)))
+
+    def test_profiles_carry_both_panels(self):
+        profs = core.clean_profiles([{"name": "Old", "buttons": core.DEFAULT_BUTTONS}])
+        self.assertEqual(profs[0]["buttons_right"], core.clean_buttons(core.DEFAULT_BUTTONS_RIGHT))
+        cfg = {"panel_profiles": profs, "panel_profile": 0}
+        core.load_profiles(cfg)
+        self.assertEqual(cfg["panel_buttons_right"], profs[0]["buttons_right"])
 
 
 class TapGestures(unittest.TestCase):
@@ -488,9 +601,79 @@ class WiFi(unittest.TestCase):
         self.addCleanup(setattr, core, "port_open", real)
         return e
 
+    def test_finds_the_tablet_at_a_new_address_by_its_key_only(self):
+        self.assertEqual(len(core.lan_candidates("192.168.0.100", "192.168.0.20")), 252)
+        self.assertEqual(core.lan_candidates("8.8.8.8", "81.2.3.4"), [])         # public: never scan
+        self.assertEqual(core.lan_candidates("10.11.99.1", "10.11.99.2"), [])    # the USB link
+        keys = {"192.168.0.31": "ssh-ed25519 AAAAother", "192.168.0.57": "ssh-ed25519 AAAAkey"}
+        find = lambda want: core.find_tablet(want, "192.168.0.100", open_port=lambda ip, *a: ip in keys,
+                                             key_at=keys.get, candidates=["192.168.0.31", "192.168.0.57", "192.168.0.80"])
+        self.assertEqual(find("ssh-ed25519 AAAAkey"), "192.168.0.57")
+        self.assertEqual(find("ssh-ed25519 AAAAgone"), "")  # an open SSH port with another key is not the tablet
+        self.assertEqual(find(""), "")
+
     def test_reads_the_wlan_address(self):
         self.assertEqual(core.Engine.wlan_ip(b"3: wlan0    inet 10.0.0.7/24 brd 10.0.0.255 scope global wlan0"), "10.0.0.7")
         self.assertEqual(core.Engine.wlan_ip(b""), "")
+
+    def watch_once(self, e):
+        class Stop:
+            def __init__(self): self.n = 0
+            def is_set(self): return self.n > 0
+            def wait(self, t): self.n += 1
+        e._stop = Stop()
+        e._watch()
+
+    def test_wifi_connects_only_on_the_button(self):
+        e = self.engine(via="", connected=False, wifi=True, wifi_host="192.168.0.100", host_key="ssh-ed25519 AAAAkey",
+                        onboarded=True, auto_connect=True)
+        e.worker = None
+        e.link = e.ssh_port = e.wifi_up = False
+        e.wifi_go = e.wifi_knock = e.wifi_lost = e.wifi_search_at = 0
+        e.wifi_search = None
+        e.manual_off, e.retry_at = False, 0
+        e.status = ("idle", "")
+        e.set_status = lambda k, t: setattr(e, "status", (k, t))
+        knocked, started = [], []
+        real_link, core.usb_link = core.usb_link, lambda h: False
+        self.addCleanup(setattr, core, "usb_link", real_link)
+        core.port_open = lambda h, *a, **k: knocked.append(h) or h == "192.168.0.100"
+        real_w, core.Worker = core.Worker, lambda eng: types.SimpleNamespace(start=lambda: started.append(1), is_alive=lambda: True, connected=False)
+        self.addCleanup(setattr, core, "Worker", real_w)
+        for _ in range(3):
+            self.watch_once(e)
+        self.assertNotIn("192.168.0.100", knocked)  # never knocks on Wi-Fi by itself
+        self.assertEqual(started, [])
+        e.connect()                                 # the button
+        self.assertEqual(e.status[0], "connecting")
+        self.assertEqual(started, [])
+        self.watch_once(e)
+        self.assertEqual((e.via, started), ("wifi", [1]))
+        e.worker = types.SimpleNamespace(connected=False, is_alive=lambda: False)
+        e.companion = types.SimpleNamespace(chan=None, stop=lambda: None)
+        e.on_disconnected(e.worker)                 # Wi-Fi dropped: no reconnect by itself
+        self.assertEqual(e.wifi_go, 0)
+        knocked.clear()
+        e.wifi_knock = 0
+        self.watch_once(e)
+        self.assertNotIn("192.168.0.100", knocked)
+
+    def test_wifi_button_gives_up_with_a_message(self):
+        e = self.engine(via="", connected=False, wifi=True, wifi_host="192.168.0.100", host_key="", onboarded=True)
+        e.worker = None
+        e.link = e.ssh_port = e.wifi_up = False
+        e.wifi_knock = e.wifi_lost = e.wifi_search_at = 0
+        e.wifi_search = None
+        e.manual_off, e.retry_at = False, 0
+        e.set_status = lambda k, t: setattr(e, "status", (k, t))
+        real_link, core.usb_link = core.usb_link, lambda h: False
+        self.addCleanup(setattr, core, "usb_link", real_link)
+        core.port_open = lambda *a, **k: False
+        e.connect()
+        e.wifi_go = time.time() - 1                 # its 25 s are up
+        self.watch_once(e)
+        self.assertEqual((e.status[0], e.wifi_go), ("error", 0))
+        self.assertIn("press Connect again", e.status[1])
 
     def test_switching_on_needs_the_cable(self):
         e = self.engine(via="wifi")

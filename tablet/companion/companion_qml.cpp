@@ -24,10 +24,11 @@ Window {
     property var held: null        // snapped shape while the pen is still down
     property bool penDown: false
 
-    // side panel
-    property string panelSide: "left"   // left | right | off
+    // side panels: one on either side, both, or none. Buttons 0-15 are the left panel's, 16-31 the right's.
+    property string panelSide: "left"   // left | right | both | off
     property real panelFrac: 0.14       // of the view width
-    property bool panelOpen: true       // folded away with the tab in its top corner
+    property bool panelOpen: true       // the left panel; folded away with the tab in its top corner
+    property bool panelOpenR: true      // the right panel
     property bool gesturesOn: true
     property bool penOut: true          // states the PC reports ("state pen 1 snap 0")
     property bool snapOn: true
@@ -37,15 +38,40 @@ Window {
     property bool keepLatch: false
     property string toast: ""
     property real penSeen: 0            // last time the pen was in range (palm rejection)
-    property int penBtn: -1             // what the pen tip is on in the panel (-2 = tab, 99 = nothing)
+    property int penBtn: -1             // what the pen tip is on in a panel (-2 / -6 = left / right tab, 99 = nothing)
     readonly property real tabS: 84
-    readonly property bool panelOn: mode === "ink" && panelSide !== "off"
-    readonly property real panelW: panelOn && panelOpen ? panelFrac * view.width : 0
-    readonly property real panelX: panelSide === "right" ? view.width - panelW : 0
+    readonly property bool panelOnL: mode === "ink" && (panelSide === "left" || panelSide === "both")
+    readonly property bool panelOnR: mode === "ink" && (panelSide === "right" || panelSide === "both")
+    readonly property bool panelOn: panelOnL || panelOnR
+    readonly property real panelPx: panelFrac * view.width
+    readonly property real panelWL: panelOnL && panelOpen ? panelPx : 0
+    readonly property real panelWR: panelOnR && panelOpenR ? panelPx : 0
+    // the panel with the gestures button and the light bar: the left one, else the right
+    readonly property string mainSide: panelOnL ? "left" : panelOnR ? "right" : ""
+    function sideOpen(s) { return s === "right" ? panelOpenR : panelOpen }
+    function sideX(s) { return s === "right" ? view.width - panelPx : 0 }
+    // which panel (or folded panel's tab) is under p: "left", "right" or ""
+    function panelAt(p) {
+        if (panelOnL && (panelOpen ? p.x < panelPx : (p.x < tabS && p.y < tabS))) return "left"
+        if (panelOnR && (panelOpenR ? p.x >= view.width - panelPx : (p.x >= view.width - tabS && p.y < tabS))) return "right"
+        return ""
+    }
     readonly property real headH: 230
     readonly property real profY: tabS + 10   // the profile row: arrows either side of its name
     readonly property real profH: 72
     property string profileName: ""
+    // "Finger gestures" at the foot of the panel opens a sheet listing them, as the PC sends
+    // them ("gesturelist [[gesture, action], ...]"); a tap anywhere closes it
+    property var gestureList: []
+    property bool gestureSheet: false
+    property bool sheetPen: false        // the pen closed the sheet: no ink until it lifts
+    readonly property real gBtnY: view.height - footH + 24
+    readonly property real gBtnH: 72
+    function gestureBtnHit(p) {
+        var s = panelAt(p)
+        return s !== "" && s === mainSide && sideOpen(s) && gesturesOn && p.y >= gBtnY && p.y < gBtnY + gBtnH
+    }
+    onGestureSheetChanged: refreshScreen()
     // paper under the ink: plain | lined | squared | dots | cross | blueprint | isometric
     property string paper: "plain"
     property real paperStep: 45          // px between lines (the PC converts from mm)
@@ -56,7 +82,9 @@ Window {
     property real traceY: 0
     property real traceOpacity: 0.5
     property bool traceAdjust: false     // fingers move / zoom the image instead of gestures
-    property bool lightOn: false
+    property int lightPct: -1            // front light in percent; -1: unknown or no front light (bar hidden)
+    readonly property bool lightOn: lightPct >= 100
+    readonly property bool lightBar: lightPct >= 0
     property bool nativeTouch: false     // fingers go to Windows as real touch, no gestures here
     // pen mask: the PC keeps it and sends it as an image (black, alpha = how masked); it is made
     // and placed in the desktop app, and only switched and inverted here
@@ -64,23 +92,34 @@ Window {
     // the mask strip: the PC's masks down the side away from the panel; a tap picks one
     property bool stripAvail: false      // there are masks: the corner tab shows, the strip opens from it
     property bool stripOpen: false
-    property string stripSide: "right"
+    property string stripSide: "right"   // inside a panel on the same side (past its tab if folded)
     property real stripFrac: 0
     property var maskList: []            // [{id, name, thumb}]
     property string maskActive: ""
     property bool stripPen: false        // the pen went down in the strip: nothing else until it lifts
     readonly property real stripW: mode === "ink" && stripAvail && stripOpen ? stripFrac * view.width : 0
-    readonly property real stripX: stripSide === "right" ? view.width - stripW : 0
+    readonly property real stripOff: stripSide === "left" ? (panelOnL ? (panelOpen ? panelPx : tabS) : 0)
+                                                          : (panelOnR ? (panelOpenR ? panelPx : tabS) : 0)
+    readonly property real stripX: stripSide === "right" ? view.width - stripOff - stripW : stripOff
+    readonly property real stripTabX: stripSide === "right" ? view.width - stripOff - tabS : stripOff
+    // what the panels and the open strip keep from the drawing area, each side
+    readonly property real resL: stripSide === "left" && stripW > 0 ? stripOff + stripW : panelWL
+    readonly property real resR: stripSide === "right" && stripW > 0 ? stripOff + stripW : panelWR
     readonly property real stripThumbH: (stripW - 24) * view.height / view.width
     readonly property real stripTileH: stripThumbH + 46
     readonly property int stripTop: 256   // the thumbnails start under Invert and None
     function stripTabHit(p) {
-        return mode === "ink" && stripAvail && p.y < tabS && (stripSide === "right" ? p.x >= view.width - tabS : p.x < tabS)
+        return mode === "ink" && stripAvail && p.y < tabS && p.x >= stripTabX && p.x < stripTabX + tabS
     }
     function inStrip(p) { return stripTabHit(p) || (stripW > 0 && p.x >= stripX && p.x < stripX + stripW) }
     function stripPick(p) {  // the corner tab, Invert, None, then a thumbnail and name per mask
         if (stripTabHit(p)) { stripOpen = !stripOpen; act("maskstrip " + (stripOpen ? 1 : 0)); return }
         if (p.y >= 96 && p.y < 166) { act("maskinvert"); return }  // the strip stays open to show it
+        if (p.y >= paperTileY && p.y < paperTileY + paperTileH) {  // the paper: left half back, right half on
+            var k = papers.indexOf(paper), n = papers.length
+            act("paper " + papers[((k < 0 ? 0 : k) + (p.x < stripX + stripW / 2 ? n - 1 : 1)) % n])
+            return
+        }
         var id = null
         if (p.y >= 176 && p.y < 246) id = "none"
         else if (p.y >= stripTop) {
@@ -89,6 +128,12 @@ Window {
         }
         if (id !== null) { stripOpen = false; act("maskpick " + id) }  // picked: the strip folds away
     }
+    // the paper selector at the foot of the strip, in the PC's order (core.PAPERS)
+    readonly property var papers: ["plain", "lined", "squared", "dots", "cross", "blueprint", "isometric"]
+    readonly property var paperNames: ({ plain: "Plain", lined: "Lined", squared: "Squared", dots: "Dots",
+                                         cross: "Crosses", blueprint: "Blueprint", isometric: "Isometric" })
+    readonly property real paperTileH: 110
+    readonly property real paperTileY: view.height - 24 - paperTileH
     property bool maskOn: false
     property bool maskInvert: false
     property int profileCount: 1
@@ -128,9 +173,23 @@ Window {
     onAreaChanged: refreshScreen()
     onModeChanged: refreshScreen()
     onPenDownChanged: epMode()
-    readonly property real footH: 190
+    readonly property real footH: lightBar ? 240 : 120
+    // the light bar at the foot of the panel: tap or drag along it, left end = off
+    readonly property real lightY: view.height - 92
+    readonly property real lightH: 66
+    function lightHit(p) {
+        var s = panelAt(p)
+        return lightBar && s !== "" && s === mainSide && sideOpen(s) && p.y >= lightY - 40 && p.y < lightY + lightH + 20
+    }
+    function lightAt(p) {
+        var f = (p.x - sideX(mainSide) - 16) / Math.max(1, panelPx - 32)
+        var pct = Math.max(0, Math.min(10, Math.round(f * 10))) * 10
+        if (pct === lightPct) return
+        lightPct = pct
+        console.warn("LIGHT:" + pct)   // main.cpp sets the light itself and tells the PC
+    }
     readonly property int rows: 8
-    readonly property real cellW: panelW / 2
+    readonly property real cellW: panelPx / 2
     readonly property real cellH: (view.height - headH - footH) / rows
 
     // The PC sends its own layout ("buttons [json]"); this is the same as its default.
@@ -159,7 +218,7 @@ Window {
         var a = line.split(" ")
         var c = a.shift()
         if (c === "rot") rot = parseInt(a[0]) % 4
-        else if (c === "mode") { mode = a[0]; endStroke(); if (mode !== "ink") clearInk() }
+        else if (c === "mode") { mode = a[0]; endStroke(); if (mode !== "ink") { clearInk(); gestureSheet = false } }
         else if (c === "next") nextTarget = parseInt(a[0])
         else if (c === "status") status = a.join(" ")
         else if (c === "area") area = a.map(parseFloat)
@@ -167,7 +226,7 @@ Window {
         else if (c === "clear") clearInk()
         else if (c === "snap") snap(a)
         else if (c === "panel") { panelSide = a[0]; if (a.length > 1) panelFrac = parseFloat(a[1]) }
-        else if (c === "panelopen") panelOpen = a[0] === "1"
+        else if (c === "panelopen") { panelOpen = a[0] === "1"; if (a.length > 1) panelOpenR = a[1] === "1" }
         else if (c === "paper") { paper = a[0]; if (a.length > 1) paperStep = Math.max(12, parseFloat(a[1])) }
         else if (c === "trace") {  // trace <opacity> <scale> <x> <y> <file or empty>
             traceOpacity = parseFloat(a[0]); traceScale = parseFloat(a[1])
@@ -192,13 +251,14 @@ Window {
             if (a.length > 3) nativeTouch = a[3] === "1"
         }
         else if (c === "toast") say(a.join(" "))
+        else if (c === "gesturelist") { try { gestureList = JSON.parse(a.join(" ")) } catch (e) { gestureList = [] } }
         else if (c === "state") {
             for (var i = 0; i + 1 < a.length; i += 2) {
                 if (a[i] === "pen") penOut = a[i + 1] === "1"
                 else if (a[i] === "snap") snapOn = a[i + 1] === "1"
-                else if (a[i] === "light") lightOn = a[i + 1] === "1"
             }
-        } else if (c === "unlatch") latched = ({})
+        } else if (c === "light") lightPct = parseInt(a[0])
+        else if (c === "unlatch") latched = ({})
     }
 
     function clearInk() {
@@ -237,23 +297,24 @@ Window {
         return q.x >= -20 && q.y >= -20 && q.x < item.width + 20 && q.y < item.height + 20
     }
     // ---- panel: the fold tab and the buttons, by finger or pen
-    function tabHit(p) {
-        return panelOn && p.y < tabS && (panelSide === "right" ? p.x >= view.width - tabS : p.x < tabS)
+    function tabHit(p) {  // the side whose fold tab is under p, or ""
+        if (p.y >= tabS) return ""
+        if (panelOnL && p.x < tabS) return "left"
+        if (panelOnR && p.x >= view.width - tabS) return "right"
+        return ""
     }
-    function inPanel(p) {
-        if (!panelOn) return false
-        if (!panelOpen) return tabHit(p)
-        return p.x >= panelX && p.x < panelX + panelW
-    }
+    function inPanel(p) { return panelAt(p) !== "" }
     // -1 / +1 on the profile arrows (only with more than one profile), 0 elsewhere
     function profileArrow(p) {
-        if (!panelOpen || profileCount < 2 || !inPanel(p) || p.y < profY || p.y >= profY + profH) return 0
-        var x = p.x - panelX
-        return x < panelW * 0.3 ? -1 : x >= panelW * 0.7 ? 1 : 0
+        var s = panelAt(p)
+        if (s === "" || !sideOpen(s) || profileCount < 2 || p.y < profY || p.y >= profY + profH) return 0
+        var x = p.x - sideX(s)
+        return x < panelPx * 0.3 ? -1 : x >= panelPx * 0.7 ? 1 : 0
     }
     function buttonAt(p) {
-        if (!panelOpen || !inPanel(p) || p.y < headH || p.y >= view.height - footH) return -1
-        var i = Math.floor((p.y - headH) / cellH) * 2 + (p.x - panelX >= cellW ? 1 : 0)
+        var s = panelAt(p)
+        if (s === "" || !sideOpen(s) || p.y < headH || p.y >= view.height - footH) return -1
+        var i = Math.floor((p.y - headH) / cellH) * 2 + (p.x - sideX(s) >= cellW ? 1 : 0) + (s === "right" ? 16 : 0)
         return i < buttons.length ? i : -1
     }
     function setLatch(i, on) {
@@ -262,13 +323,16 @@ Window {
         if (on) l[i] = true; else delete l[i]
         latched = l
     }
-    function fold() {
-        panelOpen = !panelOpen
-        act("panel " + (panelOpen ? 1 : 0))
+    function fold(s) {
+        if (s === "right") panelOpenR = !panelOpenR; else panelOpen = !panelOpen
+        act("panel " + s + " " + (sideOpen(s) ? 1 : 0))
     }
     // Returns what was pressed: -2 for the fold tab, a button index, or -1.
     function pressAt(p) {
-        if (tabHit(p)) { fold(); return -2 }
+        var t = tabHit(p)
+        if (t !== "") { fold(t); return t === "right" ? -6 : -2 }
+        if (gestureBtnHit(p)) { gestureSheet = !gestureSheet; return -4 }
+        if (lightHit(p)) { lightAt(p); return -5 }
         var arrow = profileArrow(p)
         if (arrow) { latched = ({}); act("profile " + (arrow > 0 ? "next" : "prev")); return -3 }
         var i = buttonAt(p)
@@ -323,7 +387,14 @@ Window {
             // the panel takes the pen; the PC ignores the pen over the panel too
             endStroke()
             if (touching && penBtn === -1) { penBtn = pressAt(p); if (penBtn === -1) penBtn = 99 }
+            else if (touching && penBtn === -5 && lightHit(p)) lightAt(p)   // dragging along the light bar
             else if (!touching || !inPanel(p)) { if (penBtn >= 0 && penBtn !== 99) releaseBtn(penBtn, true); else pressing = -1; penBtn = -1 }
+            return
+        }
+        if (sheetPen || (touching && gestureSheet)) {  // a tap closes the gestures sheet, and draws nothing
+            endStroke()
+            if (touching && !sheetPen) { gestureSheet = false; sheetPen = true }
+            if (!touching) sheetPen = false
             return
         }
         penDown = touching
@@ -615,8 +686,8 @@ Window {
         Item {
             id: paperArea
             visible: win.mode === "ink"
-            x: (win.panelSide === "left" ? win.panelW : 0) + (win.stripSide === "left" ? win.stripW : 0)
-            width: view.width - win.panelW - win.stripW; height: view.height
+            x: win.resL
+            width: view.width - win.resL - win.resR; height: view.height
             clip: true
             Image {
                 visible: win.traceSrc !== ""
@@ -714,6 +785,35 @@ Window {
             color: "transparent"; border.color: "black"; border.width: 2
         }
 
+        // ---------------------------------------------------------------- finger gestures sheet
+        Rectangle {
+            id: sheet
+            visible: win.mode === "ink" && win.gestureSheet
+            readonly property real areaX: win.resL
+            readonly property real areaW: view.width - win.resL - win.resR
+            width: Math.min(areaW - 80, 960); height: sheetCol.height + 64
+            x: areaX + (areaW - width) / 2; y: Math.max(40, (view.height - height) / 2)
+            color: "white"; border.width: 4; border.color: "black"; radius: 18
+            Column {
+                id: sheetCol
+                x: 40; y: 32; width: sheet.width - 80; spacing: 0
+                Text { text: "FINGER GESTURES"; font.pixelSize: 24; font.bold: true; font.letterSpacing: 4; color: "black"
+                       bottomPadding: 18 }
+                Repeater {
+                    model: win.gestureList
+                    Item {
+                        width: sheetCol.width; height: 62
+                        Rectangle { width: parent.width; height: 2; color: "black"; antialiasing: false }
+                        Text { x: 0; y: 2; width: parent.width * 0.48; height: 60; verticalAlignment: Text.AlignVCenter
+                               text: modelData[0]; font.pixelSize: 28; font.bold: true; color: "black"; elide: Text.ElideRight }
+                        Text { x: parent.width * 0.5; y: 2; width: parent.width * 0.5; height: 60; verticalAlignment: Text.AlignVCenter
+                               text: modelData[1]; font.pixelSize: 28; color: "black"; elide: Text.ElideRight }
+                    }
+                }
+                Text { topPadding: 22; text: "Tap anywhere to close"; font.pixelSize: 22; color: "black" }
+            }
+        }
+
         // ---------------------------------------------------------------- mask strip
         Item {
             visible: win.stripW > 0
@@ -740,7 +840,7 @@ Window {
                 Item {
                     property bool on: modelData.id === win.maskActive
                     x: 12; y: win.stripTop + index * (win.stripTileH + 10); width: parent.width - 24; height: win.stripTileH
-                    visible: y + height <= view.height
+                    visible: y + height <= win.paperTileY - 10
                     Rectangle { width: parent.width; height: win.stripThumbH; color: "white"
                                 border.width: parent.on ? 7 : 2; border.color: "black" }
                     Image { x: 4; y: 4; width: parent.width - 8; height: win.stripThumbH - 8
@@ -752,17 +852,33 @@ Window {
                            font.pixelSize: 21; font.bold: true; color: parent.on ? "white" : "black" }
                 }
             }
+            Rectangle {  // Paper: the pattern under the ink; tap the left half for the previous one, the right half for the next
+                x: 12; y: win.paperTileY; width: parent.width - 24; height: win.paperTileH; radius: 12
+                color: "white"; border.width: 3; border.color: "black"
+                Text { x: 0; y: 12; width: parent.width; horizontalAlignment: Text.AlignHCenter; text: "PAPER"
+                       font.pixelSize: 17; font.bold: true; font.letterSpacing: 2; color: "black" }
+                Text { x: 10; y: 46; text: "\u25C0"; font.pixelSize: 26; color: "black" }
+                Text { x: parent.width - 10 - width; y: 46; text: "\u25B6"; font.pixelSize: 26; color: "black" }
+                Text { x: 40; y: 46; width: parent.width - 80; height: 40; horizontalAlignment: Text.AlignHCenter
+                       verticalAlignment: Text.AlignVCenter; text: win.paperNames[win.paper] || win.paper
+                       font.pixelSize: 23; font.bold: true; fontSizeMode: Text.HorizontalFit; minimumPixelSize: 14; color: "black" }
+            }
         }
 
-        // ---------------------------------------------------------------- side panel
-        Item {
+        // ---------------------------------------------------------------- side panels
+        Repeater {
+          model: ["left", "right"]
+          Item {
             id: panel
-            visible: win.panelOn && win.panelOpen
-            x: win.panelX; width: win.panelW; height: view.height
+            readonly property string side: modelData
+            readonly property bool main: side === win.mainSide   // has the gestures button and the light bar
+            readonly property int first: side === "right" ? 16 : 0
+            visible: side === "right" ? win.panelOnR && win.panelOpenR : win.panelOnL && win.panelOpen
+            x: win.sideX(side); width: win.panelPx; height: view.height
             Rectangle { anchors.fill: parent; color: "white" }
-            Rectangle { x: win.panelSide === "right" ? 0 : parent.width - 3; width: 3; height: parent.height; color: "black" }
+            Rectangle { x: panel.side === "right" ? 0 : parent.width - 3; width: 3; height: parent.height; color: "black" }
             Column {
-                x: win.panelSide === "right" ? 22 : win.tabS + 14; y: 24
+                x: panel.side === "right" ? 22 : win.tabS + 14; y: 24
                 width: parent.width - win.tabS - 36; spacing: 8
                 Text { text: "PAPER\nTABLET"; font.pixelSize: 22; font.bold: true; font.letterSpacing: 4; color: "black"; lineHeight: 1.1 }
             }
@@ -791,15 +907,16 @@ Window {
                     }
                 }
             }
-            Text { x: 22; y: win.profY + win.profH + 8; width: parent.width - 44; text: win.toast || win.status
-                   font.pixelSize: 21; font.bold: win.toast !== ""; color: "black"; elide: Text.ElideRight }
+            Text { x: 22; y: win.profY + win.profH + 8; width: parent.width - 44; text: win.toast
+                   font.pixelSize: 21; font.bold: true; color: "black"; elide: Text.ElideRight }
             Repeater {
-                model: win.buttons.length
+                model: Math.max(0, Math.min(16, win.buttons.length - panel.first))
                 Item {
                     id: cell
-                    property var b: win.buttons[index]
+                    readonly property int gi: panel.first + index   // the number the PC knows it by
+                    property var b: win.buttons[gi]
                     property bool none: !b || b.kind === "none"
-                    property bool on: win.pressing === index || (b.kind === "hold" && !!win.latched[index])
+                    property bool on: win.pressing === gi || (b.kind === "hold" && !!win.latched[gi])
                                       || (b.kind === "pen" && win.penOut) || (b.kind === "snap" && win.snapOn)
                                       || (b.kind === "trace" && win.traceAdjust) || (b.kind === "light" && win.lightOn)
                                       || (b.kind === "mask" && win.maskInvert)
@@ -819,26 +936,45 @@ Window {
                             Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 18
                                    fontSizeMode: Text.HorizontalFit; minimumPixelSize: 12
                                    text: cell.b.kind === "pen" ? (win.penOut ? "on" : "off") : cell.b.kind === "snap" ? (win.snapOn ? "on" : "off")
-                                       : cell.b.kind === "light" ? (win.lightOn ? "on" : "off")
+                                       : cell.b.kind === "light" ? (win.lightBar ? win.lightPct + "%" : "")
                                        : cell.b.kind === "mask" ? (win.maskInvert ? "inverted" : "normal") : cell.b.kind === "trace" ? (win.traceAdjust ? "moving" : "image") : cell.b.s
                                    color: cell.on ? "white" : "black" }
                         }
                     }
                 }
             }
-            Text {
-                x: 22; y: view.height - win.footH + 18; width: parent.width - 44; wrapMode: Text.Wrap
-                font.pixelSize: 19; color: "black"; lineHeight: 1.1
-                text: win.gesturesOn && win.nativeTouch ? "Fingers work as a touchscreen in Windows: scroll, pinch, tap"
-                    : win.gesturesOn ? "3 fingers swipe: left undo, right redo\n2 fingers: pan, pinch to zoom\n5 fingers: twist to rotate"
-                                     : "Power button: back to notebooks"
+            Rectangle {  // opens the gestures sheet
+                visible: panel.main && win.gesturesOn
+                x: 16; y: win.gBtnY; width: parent.width - 32; height: win.gBtnH; radius: 14
+                border.width: 3; border.color: "black"; color: win.gestureSheet ? "black" : "white"
+                Text { anchors.centerIn: parent; width: parent.width - 20; horizontalAlignment: Text.AlignHCenter
+                       text: "Finger gestures"; font.pixelSize: 24; font.bold: true; fontSizeMode: Text.HorizontalFit
+                       minimumPixelSize: 14; color: win.gestureSheet ? "white" : "black" }
+            }
+            Item {  // front light: ten steps, black up to the level; the left end turns it off
+                visible: panel.main && win.lightBar
+                x: 16; y: win.lightY - 34; width: parent.width - 32; height: win.lightH + 34
+                Text { x: 6; y: 0; font.pixelSize: 21; font.bold: true; color: "black"
+                       text: win.lightPct > 0 ? "Light " + win.lightPct + "%" : "Light off" }
+                Row {
+                    y: 34; height: win.lightH; spacing: 4
+                    Repeater {
+                        model: 10
+                        Rectangle {
+                            width: (parent.parent.width - 36) / 10; height: win.lightH; radius: 6
+                            border.width: 3; border.color: "black"
+                            color: (index + 1) * 10 <= win.lightPct ? "black" : "white"
+                        }
+                    }
+                }
             }
         }
+        }
 
-        // The mask strip's corner tab: a half-shaded square, on the side away from the panel.
+        // The mask strip's corner tab: a half-shaded square at the strip's top corner.
         Rectangle {
             visible: win.mode === "ink" && win.stripAvail
-            x: win.stripSide === "right" ? view.width - win.tabS : 0; y: 0
+            x: win.stripTabX; y: 0
             width: win.tabS; height: win.tabS
             color: win.stripOpen ? "black" : "white"; border.width: 3; border.color: "black"
             Rectangle {
@@ -848,26 +984,32 @@ Window {
             }
         }
 
-        // The fold tab: top-left corner (top-right for a right-hand panel), open or folded.
-        Rectangle {
-            visible: win.panelOn
-            x: win.panelSide === "right" ? view.width - win.tabS : 0; y: 0
+        // The fold tabs: top-left corner for the left panel, top-right for the right one.
+        Repeater {
+          model: ["left", "right"]
+          Rectangle {
+            id: ftab
+            readonly property string side: modelData
+            readonly property bool hot: win.penBtn === (side === "right" ? -6 : -2)
+            visible: side === "right" ? win.panelOnR : win.panelOnL
+            x: side === "right" ? view.width - win.tabS : 0; y: 0
             width: win.tabS; height: win.tabS
-            color: win.penBtn === -2 ? "black" : "white"; border.width: 3; border.color: "black"
+            color: hot ? "black" : "white"; border.width: 3; border.color: "black"
             // a solid triangle pointing the way the panel will move, built from 2 px rows so it
             // stays crisp on e-ink (no anti-aliased edges to drop out)
             Item {
                 anchors.centerIn: parent; width: 26; height: 36
-                rotation: ((win.panelSide === "right") === win.panelOpen) ? 180 : 0
+                rotation: ((ftab.side === "right") === win.sideOpen(ftab.side)) ? 180 : 0
                 Repeater {
                     model: 18
                     Rectangle {
                         property real w: 26 * (1 - Math.abs(index - 8.5) / 9)
                         x: 26 - w; y: index * 2; width: w; height: 2
-                        color: win.penBtn === -2 ? "white" : "black"; antialiasing: false
+                        color: ftab.hot ? "white" : "black"; antialiasing: false
                     }
                 }
             }
+          }
         }
 
         // Fingers: panel buttons, the fold tab and gestures. Mouse events are left alone, so the
@@ -882,6 +1024,11 @@ Window {
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i], p = Qt.point(t.x, t.y)
                     console.warn("LOG:touch " + Math.round(t.x) + "," + Math.round(t.y) + " size " + Math.round(win.touchSize(t)))
+                    if (win.gestureSheet && !win.inPanel(p)) {  // a tap closes the sheet and does nothing else
+                        win.gestureSheet = false
+                        var tbx = win.touchBtn; tbx[t.pointId] = -1; win.touchBtn = tbx
+                        continue
+                    }
                     if (win.inStrip(p)) {  // a mask tile: picked at once, the finger does nothing more
                         var tbs = win.touchBtn; tbs[t.pointId] = -1; win.touchBtn = tbs
                         win.stripPick(p)
@@ -903,6 +1050,11 @@ Window {
                 win.gLastEv = Date.now()
                 for (var i = 0; i < pts.length; i++) {
                     var t = pts[i]
+                    if (win.touchBtn[t.pointId] === -5) {  // a finger sliding along the light bar
+                        var lp = Qt.point(t.x, t.y)
+                        if (win.lightHit(lp)) win.lightAt(lp)
+                        continue
+                    }
                     if (g[t.pointId] && win.palmCheck(t)) { palm = true; continue }
                     if (g[t.pointId]) { g[t.pointId] = {x: t.x, y: t.y}; moved = true }
                 }

@@ -19,6 +19,9 @@ echo $$ > "$LOCK/pid"
 # The PC may turn the front light to full (light-pad mode); this is what to put back.
 FL=/sys/class/backlight/rm_frontlight
 cat "$FL/brightness" > "$LOCK/light" 2>/dev/null
+# bl_power 0 = lit, 4 = powered down. The notebook app powers the light down when its own light
+# setting is off, and a brightness change does nothing until it is powered up again.
+cat "$FL/bl_power" > "$LOCK/bl_power" 2>/dev/null
 restore() {
     trap - EXIT INT TERM HUP
     # $APP is the tee at the end of the pipe, so stop the app itself by name too.
@@ -32,6 +35,7 @@ restore() {
     fi
     { echo rmpp-companion > /sys/power/wake_unlock; } 2>/dev/null
     [ -s "$LOCK/light" ] && cat "$LOCK/light" > "$FL/brightness" 2>/dev/null
+    [ -s "$LOCK/bl_power" ] && cat "$LOCK/bl_power" > "$FL/bl_power" 2>/dev/null
     rm -f "$DIR"/trace.* "$DIR"/mask*.png "$DIR"/thumb*.png
     rm -rf "$LOCK"
     echo "companion: screen returned to xochitl"

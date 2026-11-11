@@ -23,8 +23,10 @@ handle undo, redo, pan and zoom.
   notebooks within seconds. Nothing is installed permanently on the tablet.
 - **Calibration** with 9, 4 or 0 targets. It learns exactly where the pen lands and which way round the
   tablet sits on your desk.
-- **Screen area.** Pick a display, choose fill / whole tablet / stretch, and drag out the part of the tablet
-  you want to use. A stroke that runs off that part lifts, instead of drawing along the screen edge.
+- **Screen area (Calibrate).** A picture of the tablet as it sits on your desk. Pick a display, choose
+  fill / whole tablet / stretch, and drag out the part of the tablet you want to use; the picture labels the
+  active area's and the display's aspect ratios. A stroke that runs off that part lifts, instead of drawing
+  along the screen edge.
 - **Pen feel.** A pressure curve, a light-touch threshold, a full-range check, and tilt on or off.
 - **Hold to snap.** Draw a line, circle, ellipse, triangle, rectangle or polygon, then hold the pen still and
   it becomes a clean shape, as in the tablet's own notebooks.
@@ -33,11 +35,12 @@ handle undo, redo, pan and zoom.
   The panel folds away from its corner tab when you want the whole surface. Keep as many named button sets
   (profiles) as you like, for example one per app, and switch with the arrows at the top of the panel.
 - **Paper and tracing on the tablet screen.** Lined, squared, dot, cross, blueprint or isometric paper under
-  your strokes, and a tracing image you can move and zoom with your fingers. The front light can go to full
+  your strokes, and a tracing image you can move and zoom with your fingers, or by dragging it on Home, which
+  shows what the app tells the tablet screen to draw (paper, image, mask, panel and tabs) with the live pen. The front light can go to full
   while you trace, and comes back to your level afterwards.
-- **Pen mask (Screen area page).** Works like a stencil in shades of grey: black ignores the pen, white leaves it
+- **Pen mask (Home).** Works like a stencil in shades of grey: black ignores the pen, white leaves it
   alone, and grey either fades the pressure (mid grey gives half) or needs a firmer press. Add a mask from any
-  image, read in greyscale, then place and zoom it on the Screen area picture, with a contrast setting and an
+  image, read in greyscale, then place and zoom it on the tablet picture on Home, with a contrast setting and an
   Invert toggle on top. Keep as many named masks as you like and switch between them, or invert the one in use,
   from a corner tab on the tablet, on the side away from the shortcut panel.
 - **Wi-Fi.** Plugged in once, the app can switch on reMarkable's own SSH over Wi-Fi and from then on find the
@@ -47,6 +50,7 @@ handle undo, redo, pan and zoom.
   - Three-finger swipe for undo and redo, one step per stretch of the drag, live as you swipe.
   - Two-finger drag to pan and pinch to zoom; five-finger twist to rotate the canvas.
   - Tap gestures you can assign (one-finger triple tap = new layer by default).
+  - A Finger gestures button at the foot of the panel lists them all on the tablet.
 
   Fingers are ignored while the pen is near the screen, and palm-sized contacts are ignored always, so a
   resting hand does nothing.

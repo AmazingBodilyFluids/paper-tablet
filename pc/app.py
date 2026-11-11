@@ -128,8 +128,11 @@ class Api:
     def set_output(self, on):
         self._engine.set_output(on)
 
-    def set_screen(self, on):
-        self._engine.set_screen(on)
+    def restart_screen(self):
+        self._engine.restart_screen()
+
+    def set_light(self, pct):
+        self._engine.set_light(pct)
 
     def clear_ink(self):
         self._engine.companion.send("clear")
@@ -138,8 +141,21 @@ class Api:
         """The pen mask as stored (before contrast): base64 of N x N bytes, and its version."""
         return {"b64": self._engine.pmask.b64(), "ver": self._engine.pmask.ver, "n": penmask.N}
 
-    def set_mask(self, b64):
-        return self._engine.set_mask(b64)
+    def set_mask(self, b64, place=None):
+        return self._engine.set_mask(b64, place)
+
+    def set_mask_source(self, data_url):
+        return self._engine.set_mask_source(data_url)
+
+    def mask_source(self):
+        return self._engine.mask_source()
+
+    # the Tablet screen page's picture: the images the tablet is sent
+    def trace_image(self):
+        return self._engine.trace_image()
+
+    def mask_thumbs(self):
+        return self._engine.mask_thumbs()
 
     def mask_op(self, name):
         self._engine.mask_op(name)
