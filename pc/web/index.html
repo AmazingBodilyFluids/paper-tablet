@@ -211,8 +211,6 @@
               <label class="switch"><input type="checkbox" data-key="tilt"><span class="track"></span></label></div>
             <div class="opt"><div class="tx"><div class="t1">Lift the pen at the edge</div><div class="t2">A stroke that runs off the active area stops instead of drawing along the screen edge</div></div>
               <label class="switch"><input type="checkbox" data-key="edge_lift"><span class="track"></span></label></div>
-            <div class="opt"><div class="tx"><div class="t1">Windows pen feedback</div><div class="t2">Ripples and cursor effects Windows draws</div></div>
-              <select class="input" data-key="feedback" style="width:150px"><option value="indirect">Cursor only</option><option value="default">Windows default</option><option value="none">None</option></select></div>
           </div>
           <div class="pane">
             <div class="pane-title">Full-range check</div>
@@ -220,7 +218,7 @@
             <div class="meter mt"><i id="peakBar"></i></div>
             <div class="row between mts"><span class="readout" id="peakText" style="margin:0"></span><button class="btn ghost" onclick="api().reset_peak()">Reset</button></div>
           </div>
-          <div class="note"><svg><use href="#i-info"/></svg><div>Photoshop: turn on <b>Pen Pressure</b> for brush size or opacity. Krita and Clip Studio: choose <b>Windows Ink</b> as the tablet input.</div></div>
+          <div class="note"><svg><use href="#i-info"/></svg><div>Krita, GIMP, Inkscape and Xournal++ get pressure and tilt through their normal tablet support. On Wayland, if Krita ignores the pen, start it with <code>QT_QPA_PLATFORM=xcb krita</code>.</div></div>
         </div>
       </div>
     </section>
@@ -258,9 +256,9 @@
               <div class="seg maskSide"><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="off">Off</button></div></div>
             <div class="opt"><div class="tx"><div class="t1">Finger gestures</div><div class="t2">3 fingers swipe: undo / redo. 2 fingers: pan, pinch zoom</div></div>
               <label class="switch"><input type="checkbox" data-key="gestures"><span class="track"></span></label></div>
-            <div class="opt"><div class="tx"><div class="t1">Fingers in this profile</div><div class="t2"><b>Shortcuts</b> turn gestures into keys for your drawing app. <b>Windows touch</b> makes the tablet a touchscreen: apps scroll with inertia, pinch and rotate by themselves. The pen still mutes fingers while it's near.</div></div>
-              <div class="seg" id="profTouch"><button data-v="shortcuts">Shortcuts</button><button data-v="windows">Windows touch</button></div></div>
-            <div class="opt"><div class="tx"><div class="t1">Rotate key</div><div class="t2">Five fingers twisted rotate the canvas: this key is held while the app drags round the window centre. Photoshop: <code>r</code>, Krita / Clip Studio: <code>shift+space</code></div></div>
+            <div class="opt"><div class="tx"><div class="t1">Fingers in this profile</div><div class="t2"><b>Shortcuts</b> turn gestures into keys for your drawing app. <b>Touchscreen</b> makes the tablet a touchscreen: apps scroll with inertia, pinch and rotate by themselves. The pen still mutes fingers while it's near.</div></div>
+              <div class="seg" id="profTouch"><button data-v="shortcuts">Shortcuts</button><button data-v="windows">Touchscreen</button></div></div>
+            <div class="opt"><div class="tx"><div class="t1">Rotate key</div><div class="t2">Five fingers twisted rotate the canvas: this key is held while the app drags round the window centre. Krita: <code>shift+space</code>, apps that rotate with R: <code>r</code></div></div>
               <input class="input mono" data-key="rotate_keys" style="width:130px"></div>
             <div class="opt"><div class="tx"><div class="t1">Swipe step</div><div class="t2">How far a 3-finger swipe goes for each undo or redo; drag back to take steps back</div></div>
               <div class="seg" data-key="swipe_step"><button data-v="70">Short</button><button data-v="100">Medium</button><button data-v="150">Long</button></div></div>
@@ -274,7 +272,7 @@
               <div class="kinds" id="peKinds">
                 <button data-k="shortcut"><b>Shortcut</b><span>Taps a key or combination</span></button>
                 <button data-k="hold"><b>Hold key</b><span>Held while you touch it; a quick tap locks it</span></button>
-                <button data-k="pen"><b>Pen on/off</b><span>Pauses the pen in Windows</span></button>
+                <button data-k="pen"><b>Pen on/off</b><span>Pauses the pen</span></button>
                 <button data-k="snap"><b>Shapes on/off</b><span>Hold-to-snap shapes</span></button>
                 <button data-k="clear"><b>Clear ink</b><span>Only useful if trails are set to stay</span></button>
                 <button data-k="trace"><b>Move image</b><span>Fingers move and zoom the tracing image</span></button>
@@ -327,8 +325,6 @@
         <div class="stack">
           <div class="pane">
             <div class="pane-title">Behaviour</div>
-            <div class="opt"><div class="tx"><div class="t1">Keep running in the tray when the window is closed</div><div class="t2">The pen keeps working. Open or exit Paper Tablet from its tray icon.</div></div>
-              <label class="switch"><input type="checkbox" data-key="close_to_tray"><span class="track"></span></label></div>
             <details class="disclose">
               <summary><div class="tx"><div class="t1">Theme</div><div class="t2" id="themeName"></div></div>
                 <svg class="chev" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3"/></svg></summary>

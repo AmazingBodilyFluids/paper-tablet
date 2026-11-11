@@ -1,10 +1,10 @@
 # Paper Tablet
 
-**Use a reMarkable Paper Pro as a pressure-sensitive pen tablet for Windows.** The reMarkable 2 and 1
+**Use a reMarkable Paper Pro as a pressure-sensitive pen tablet on Linux.** The reMarkable 2 and 1
 are supported in beta.
 
-Plug the tablet into your PC with its USB cable and draw in Photoshop, Krita, Clip Studio, Illustrator or any
-Windows Ink app. You get pressure, tilt, hover and the eraser end. The tablet's own screen shows your
+Plug the tablet into your PC with its USB cable and draw in Krita, GIMP, Inkscape, Xournal++ or any
+app with tablet support. You get pressure, tilt, hover and the eraser end. The tablet's own screen shows your
 strokes as a fading trail. A side panel puts your shortcuts under your other hand, and finger gestures
 handle undo, redo, pan and zoom.
 
@@ -17,8 +17,8 @@ handle undo, redo, pan and zoom.
 
 ## Features
 
-- **A real Windows pen.** It uses Windows' own pen input (Windows Ink), so apps see a pen, not a mouse,
-  and no driver is needed. You get 4096 pressure levels, tilt, hover and the eraser end.
+- **A real pen tablet.** It creates a virtual tablet device (uinput), so your desktop and apps see a pen,
+  not a mouse, on Wayland (Hyprland, Sway, GNOME, KDE) and X11. You get 4096 pressure levels, tilt, hover and the eraser end.
 - **Plug and play.** Plug in and the pen and the tablet screen start. Unplug and the tablet goes back to your
   notebooks within seconds. Nothing is installed permanently on the tablet.
 - **Calibration** with 9, 4 or 0 targets. It learns exactly where the pen lands and which way round the
@@ -68,27 +68,19 @@ handle undo, redo, pan and zoom.
 - Or, in beta and not yet tested on real hardware, a **reMarkable 2** or **reMarkable 1** on software 3.28 or
   newer (the tablet screen is built against that release's Qt). These need no developer mode: their cable
   connection takes SSH as they come. They have no front light, so the light-pad option does nothing there.
-- **Windows 10 (1809 or newer) or Windows 11**, and the USB-C cable. Linux: preview, see below.
-- The installer and portable version bring everything else with them. Running from source needs Python 3.10+.
+- **A Linux desktop** (Wayland or X11) with Python 3.10+, and the USB-C cable. First target: Omarchy (Arch + Hyprland).
 
 ## Install
 
-Download from [Releases](../../releases):
+```sh
+git clone -b linux https://github.com/AmazingBodilyFluids/paper-tablet.git
+cd paper-tablet
+./linux/setup.sh
+```
 
-- **`PaperTablet-Setup-x.y.z.exe`** installs for your user account only, with no admin rights. You get a
-  Start-menu entry, and an uninstaller removes it cleanly.
-- **`PaperTablet-Portable-x.y.z.zip`** needs no installation. Unzip it anywhere, even onto a USB stick, and run
-  *Paper Tablet*. Settings, calibration and the app's key stay in the `data` folder next to it, so nothing
-  is left on the PC.
-
-The builds aren't code-signed yet, so Windows SmartScreen may warn the first time you run them
-(*More info → Run anyway*).
-
-**Linux (preview, first build):** see [linux/README-linux.md](linux/README-linux.md). It installs with one
-script and uses a virtual tablet device, so it works on Wayland (Hyprland, Sway, GNOME, KDE).
-
-**From source:** clone this repo and double-click `Paper Tablet.bat`. It installs `paramiko` and `pywebview`
-once, then starts the app.
+`setup.sh` installs the window libraries, a private Python environment, a udev rule for `/dev/uinput` and a
+launcher entry; details and troubleshooting are in [linux/README-linux.md](linux/README-linux.md).
+Log out and back in once, then start *Paper Tablet* from your launcher or run `linux/paper-tablet.sh`.
 
 ## First run
 
@@ -105,10 +97,8 @@ After that, plugging in is all it takes.
 ## Using it
 
 **In your drawing app.**
-- Photoshop uses Windows Ink by default. Turn on *Pen Pressure* for brush size or opacity. If a
-  `PSUserConfig.txt` containing `UseSystemStylus 0` exists in Photoshop's settings folder, remove it.
-- Krita, Clip Studio, Illustrator and Affinity: choose their *Windows Ink* or *Windows Pointer* tablet mode.
-- Apps that only speak **WinTab** see a pen without pressure.
+- Krita, GIMP, Inkscape, MyPaint, Xournal++ and Rnote get pressure and tilt through their normal tablet support.
+- Krita on Wayland: if it ignores the pen, start it through XWayland: `QT_QPA_PLATFORM=xcb krita`.
 
 **Shortcut panel.** It sits on the left or right edge of the tablet, about 34 mm wide, with 8 rows of 2 buttons.
 - **Editing.** On the *Panel & gestures* page, click a button to set its title and what it does, and drag one
@@ -119,7 +109,7 @@ After that, plugging in is all it takes.
   - *Pen on/off* and *Shapes on/off* switch those features.
   - *Clear ink* wipes the tablet's trails.
   - *Empty* leaves a gap.
-- **Defaults:** Undo, Redo, brush size −/+, Brush, Eraser, Hand (hold Space), Pick (hold Alt), Ctrl, Shift,
+- **Defaults:** Undo, Redo, brush size −/+, Brush, Eraser, Hand (hold Space), Pick (hold Ctrl), Ctrl, Shift,
   Zoom −/+, Fit, Shapes, Pen, Save.
 - **Folding.** The triangle in the panel's top corner folds the panel away, and the drawing area grows to
   the full width.
@@ -131,13 +121,13 @@ After that, plugging in is all it takes.
 | 3 fingers, swipe left / right | Undo / redo. One step per ~11 mm of swipe, live, and dragging back takes steps back (Short / Medium / Long) |
 | 2 fingers, drag | Pan (holds Space and drags, like the hand tool) |
 | 2 fingers, pinch | Zoom in / out (Ctrl+= / Ctrl+-) |
-| 5 fingers, twist | Rotate the canvas (holds R and drags round the window centre; Shift+Space for Krita / Clip Studio) |
-| 1 finger, triple tap | New layer (Ctrl+Shift+Alt+N), changeable |
-| 5 fingers, double tap | Reset the canvas rotation (holds R and presses Esc; Krita: `5`), changeable |
+| 5 fingers, twist | Rotate the canvas (holds Shift+Space and drags round the window centre) |
+| 1 finger, triple tap | New layer (Insert), changeable |
+| 5 fingers, double tap | Reset the canvas rotation (`5`), changeable |
 | 5 fingers, swipe down | Clear the tablet ink and cleanly refresh the whole screen (clears e-ink leftovers) |
 | 1-finger double tap, 2-finger tap and double tap, 3-finger tap | Off until you assign keys |
 
-The default shortcuts follow Photoshop. Krita and Clip Studio use most of the same keys; change any that differ.
+The default shortcuts follow Krita (profile *Krita*). Other apps use most of the same keys; change any that differ.
 
 **Hold to snap.** Draw a shape and keep the pen still for 0.6 s. The app lifts the pen, presses Ctrl+Z to
 remove your stroke, and draws the clean shape with your stroke's own pressure. Because it relies on Ctrl+Z
@@ -158,12 +148,10 @@ removing exactly one stroke, it only works in the drawing programs listed on *Pe
 
 ## Building
 
-- **Run the tests:** `cd pc && python -m unittest test_shapes test_rmtablet test_panel`.
+- **Run the tests:** `cd pc && python -m unittest test_shapes test_rmtablet test_panel test_linux`.
+- **Check the virtual devices** without the tablet: `python3 linux/check_devices.py`.
 - **The tablet programs** are built with reMarkable's official Paper Pro SDK
   (`SDK=/path/to/sdk tablet/companion/build.sh`). Prebuilt binaries are in the repo.
-- **The installer and portable zip** are built with the scripts in `installer/` (embedded Python + Inno Setup).
-- **Portable mode** works with any copy: put an empty file named `portable` (or `portable.txt`) next to
-  `Paper Tablet.bat` or the exe, and everything is kept in `data\` beside it.
 
 [docs/TECHNICAL.md](docs/TECHNICAL.md) covers how it works: measured hardware ranges, the tablet-screen app,
 and the command-line tool.

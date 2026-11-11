@@ -124,6 +124,20 @@ DEFAULT_TAPS = {"1x2": {"t": "", "keys": ""}, "1x3": {"t": "New layer", "keys": 
                 "2x1": {"t": "", "keys": ""}, "2x2": {"t": "", "keys": ""}, "3x1": {"t": "", "keys": ""},
                 "5x2": {"t": "Reset rotation", "keys": "r+esc"}}
 DEFAULTS["taps"] = DEFAULT_TAPS
+
+# Linux: Krita is the drawing app to expect, so the first layout uses its keys
+# (docs.krita.org "Introduction to Krita coming from Photoshop": Ins new paint layer,
+# Ctrl+Shift+A deselect, T move, Shift+Space rotate, 5 reset rotation; Ctrl held samples colour).
+LINUX_KEYS = {"New layer": "insert", "Deselect": "ctrl+shift+a", "Move": "t", "Rotate": "shift+space",
+              "Pick": "ctrl", "Fill": "f"}
+DEFAULT_PROFILE = "Photoshop"
+if sys.platform.startswith("linux"):
+    DEFAULT_PROFILE = "Krita"
+    for _b in DEFAULT_BUTTONS + DEFAULT_BUTTONS_RIGHT:
+        _b["keys"] = LINUX_KEYS.get(_b["t"], _b["keys"])
+    DEFAULT_TAPS["1x3"]["keys"] = "insert"
+    DEFAULT_TAPS["5x2"]["keys"] = "5"
+    DEFAULTS["rotate_keys"] = "shift+space"
 MASK_KEYS = {"mask_contrast": "contrast", "mask_mode": "mode", "mask_invert": "invert"}  # cfg -> the active mask's entry
 BUTTON_KINDS = ("shortcut", "hold", "pen", "snap", "clear", "trace", "light", "mask", "none")
 MASK_N = penmask.N
@@ -148,7 +162,7 @@ def clean_profiles(profiles, current=None):
         touch = p.get("touch") if p.get("touch") in TOUCH_MODES else "shortcuts"
         out.append({"name": name, "buttons": clean_buttons(p.get("buttons")),
                     "buttons_right": clean_buttons(p.get("buttons_right") or DEFAULT_BUTTONS_RIGHT), "touch": touch})
-    return out or [{"name": "Photoshop", "buttons": clean_buttons(current or DEFAULT_BUTTONS),
+    return out or [{"name": DEFAULT_PROFILE, "buttons": clean_buttons(current or DEFAULT_BUTTONS),
                     "buttons_right": clean_buttons(DEFAULT_BUTTONS_RIGHT), "touch": "shortcuts"}]
 
 
@@ -1222,7 +1236,7 @@ class Engine:
         if not self.cfg.get("gestures", True):
             return []
         if self.touch_mode() == "windows":
-            rows = [["One finger", "Touch in Windows"], ["Two fingers", "Scroll, pinch to zoom"]]
+            rows = [["One finger", "Touch on the desktop" if sys.platform.startswith("linux") else "Touch in Windows"], ["Two fingers", "Scroll, pinch to zoom"]]
         else:
             rows = [["3 fingers, swipe left", "Undo"], ["3 fingers, swipe right", "Redo"],
                     ["2 fingers, drag", "Pan the canvas"], ["2 fingers, pinch", "Zoom"]]
@@ -1972,7 +1986,7 @@ class Engine:
                     import linuxinput
                     self.touch_out = linuxinput.LinuxTouch()
             except OSError as ex:
-                self.set_status("error", f"Windows touch isn't available: {ex}")
+                self.set_status("error", f"Touch input isn't available: {ex}")
                 return
         if self.touch_out:
             self.touch_out.update({cid: self.mapper.frac_to_screen(p, q) for cid, p, q in pts} if live else {})

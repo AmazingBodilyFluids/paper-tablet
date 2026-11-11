@@ -67,7 +67,7 @@ function status() {
   if (S.calibrating) return { dot: "busy", lbl: "Calibrating", title: S.calibrating.prompt, text: "Follow along in the calibration window." };
   if (S.connected) {
     const bits = [];
-    bits.push(S.output ? "The pen is drawing in Windows." : "The pen is connected but not sent to Windows yet.");
+    bits.push(S.output ? "The pen is drawing." : "The pen is connected but paused.");
     if (S.screen) bits.push("Your strokes show on the tablet screen.");
     else bits.push("The tablet screen was closed on the tablet, so your notebooks are showing.");
     return { dot: "ok", lbl: "Connected", title: S.output ? "Ready. Draw away." : "Connected", text: bits.join(" ") };
@@ -83,7 +83,7 @@ function status() {
 
 // ------------------------------------------------------------------ render
 
-// Title bar: one light for the tablet's connection, one for the pen reaching Windows.
+// Title bar: one light for the tablet's connection, one for the pen reaching the desktop.
 function indicators(s) {
   const st = S.status.kind;
   const [td, tt] = S.connected ? ["ok", S.via === "wifi" ? "Tablet on Wi-Fi" : "Tablet connected"]
@@ -98,7 +98,7 @@ function indicators(s) {
   $("#penDot").className = "dot " + pd;
   $("#indPen").className = "ind " + pd;
   $("#indPen").title = pt + (!S.connected ? ": connect the tablet to use the pen" : S.output
-    ? ": the pen draws in Windows" : ": the pen isn't sent to Windows. Turn on Pen in Windows next to this, or from the tray icon");
+    ? ": the pen draws" : ": the pen is paused. Turn on Pen next to this");
   $("#indPen").setAttribute("aria-label", pt);
 }
 
@@ -111,7 +111,7 @@ function banner(s) {
   const closed = S.connected && !S.calibrating && !S.screen;
   $("#banDot").className = "dot " + (uncal ? "warn" : s.dot);
   $("#banTitle").textContent = closed ? "Tablet screen closed" : uncal ? "Not calibrated yet" : s.title;
-  $("#banText").textContent = closed ? "The power button on the tablet handed it back to your notebooks. The pen still works in Windows."
+  $("#banText").textContent = closed ? "The power button on the tablet handed it back to your notebooks. The pen still works."
     : uncal ? "The cursor follows the desk position picked under Calibrate, using the whole tablet. Calibrate once for exact tracking." : s.text;
   const acts = $("#banActions");
   acts.innerHTML = "";
@@ -136,7 +136,7 @@ function render() {
   $("#devName").textContent = S.device ? S.model.name + (S.model.verified ? "" : " (beta)") : (S.ssh ? "Tablet found" : "Not connected");
   $("#devMeta").textContent = S.device ? `${S.cfg.host} · kernel ${S.device.kernel}` : (S.ssh ? S.cfg.host : "Plug in the USB cable");
 
-  setTbt("#tgOutput", S.output, S.connected, "Pen in Windows", "draw in Photoshop, Krita, anything");
+  setTbt("#tgOutput", S.output, S.connected, "Pen", "draw in Krita, GIMP, anything");
   for (const seg of $$(".maskSide")) {
     const v = S.cfg.mask_panel === false ? "off" : S.cfg.mask_side || "right";
     for (const b of $$("button", seg)) b.classList.toggle("on", b.dataset.v === v);
@@ -530,7 +530,7 @@ function gestureText() {
   const n = t ? t.pts.length : 0;
   let g = GESTURES[a] || (a.startsWith("tap ") ? `${a.split(" ")[1]}-finger tap ×${a.split(" ")[2]}` : a.startsWith("press ") ? "panel button" : "");
   if (t && n && !t.live) g = `${n} finger${n > 1 ? "s" : ""} muted (pen near or palm)`;
-  else if (n && !g) g = `${n} finger${n > 1 ? "s" : ""} down` + (S.touch_mode === "windows" ? ", sent to Windows as touch" : "");
+  else if (n && !g) g = `${n} finger${n > 1 ? "s" : ""} down` + (S.touch_mode === "windows" ? ", sent to the desktop as touch" : "");
   if (t && t.palms) g += (g ? " · " : "") + `${t.palms} palm contact${t.palms > 1 ? "s" : ""} ignored`;
   return g;
 }
@@ -936,7 +936,7 @@ const Wizard = {
     switch (this.step) {
       case 0: return `
         <div class="lbl">Welcome</div><h1 class="mt">Turn your reMarkable into a drawing tablet</h1>
-        <p class="lead">Your reMarkable becomes a pen tablet for Windows, with pressure, tilt and the eraser end, and it shows what you draw on its own screen. This guide takes about 15 minutes, once.</p>
+        <p class="lead">Your reMarkable becomes a pen tablet for Linux, with pressure, tilt and the eraser end, and it shows what you draw on its own screen. This guide takes about 15 minutes, once.</p>
         <div class="illus"><svg viewBox="0 0 300 140" fill="none" stroke-linecap="round" stroke-linejoin="round">
           <rect x="8" y="30" width="120" height="86" rx="7" style="stroke:var(--accent)" stroke-width="1.5"/><rect x="18" y="38" width="100" height="70" style="fill:var(--accent-d)"/>
           <path d="M30 92c14-26 24-26 32-10s18 16 32-14" style="stroke:var(--text)" stroke-width="2"/>
@@ -978,7 +978,7 @@ const Wizard = {
         <div class="pane-title mt2">Not working?</div>
         <ol class="steps">
           <li><div>Wake and unlock the tablet. It disconnects while asleep.</div></li>
-          <li><div>Unplug the cable, wait five seconds, plug it back in. Windows sometimes needs a second try.</div></li>
+          <li><div>Unplug the cable, wait five seconds, plug it back in. The USB network sometimes needs a second try. Still nothing: see linux/README-linux.md.</div></li>
           <li><div>Try another USB port or cable. Some cables only charge.</div></li>
         </ol>`;
       case 4: return `
@@ -1012,12 +1012,12 @@ const Wizard = {
         <p class="lead">Keep Paper Tablet running. Whenever you plug in the tablet, it connects, turns on the pen and shows the tablet screen. Unplug it and your notebooks come straight back.</p>
         <div class="pane-title mt2">Where things are</div>
         <ol class="steps">
-          <li><div><b>Title bar</b>: two lights for the tablet and the pen, and buttons that turn the pen in Windows, the tablet screen and shapes on and off.</div></li>
+          <li><div><b>Title bar</b>: two lights for the tablet and the pen, and buttons that turn the pen, the tablet screen and shapes on and off.</div></li>
           <li><div><b>Home</b>: the tablet screen as it will look, with paper, a tracing image and pen masks.</div></li>
           <li><div><b>Calibrate</b>: calibrate again, and choose the display and the part of the tablet you draw on.</div></li>
           <li><div><b>Pen feel</b> for pressure, and <b>Panel &amp; gestures</b> for the shortcut buttons on the tablet.</div></li>
         </ol>
-        <div class="note mt"><svg><use href="#i-info"/></svg><div>Photoshop: turn on <b>Pen Pressure</b> for brush size or opacity. Krita and Clip Studio: choose <b>Windows Ink</b> as the tablet input.</div></div>`;
+        <div class="note mt"><svg><use href="#i-info"/></svg><div>Krita, GIMP, Inkscape and Xournal++ get pressure and tilt through their normal tablet support. On Wayland, if Krita ignores the pen, start it with <code>QT_QPA_PLATFORM=xcb krita</code>.</div></div>`;
     }
   },
 
