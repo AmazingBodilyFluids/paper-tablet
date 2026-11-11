@@ -162,7 +162,7 @@ Window {
     onAreaChanged: refreshScreen()
     onModeChanged: refreshScreen()
     onPenDownChanged: epMode()
-    readonly property real footH: lightBar ? 300 : 190
+    readonly property real footH: lightBar ? 240 : 120
     // the light bar at the foot of the panel: tap or drag along it, left end = off
     readonly property real lightY: view.height - 92
     readonly property real lightH: 66
@@ -928,12 +928,6 @@ Window {
                 Text { anchors.centerIn: parent; width: parent.width - 20; horizontalAlignment: Text.AlignHCenter
                        text: "Finger gestures"; font.pixelSize: 24; font.bold: true; fontSizeMode: Text.HorizontalFit
                        minimumPixelSize: 14; color: win.gestureSheet ? "white" : "black" }
-            }
-            Text {
-                visible: panel.main
-                x: 22; y: win.gesturesOn ? win.gBtnY + win.gBtnH + 20 : view.height - win.footH + 24
-                width: parent.width - 44; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
-                font.pixelSize: 19; color: "black"; text: "Power button: back to notebooks"
             }
             Item {  // front light: ten steps, black up to the level; the left end turns it off
                 visible: panel.main && win.lightBar

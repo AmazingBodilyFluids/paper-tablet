@@ -566,6 +566,17 @@ class WiFi(unittest.TestCase):
         self.addCleanup(setattr, core, "port_open", real)
         return e
 
+    def test_finds_the_tablet_at_a_new_address_by_its_key_only(self):
+        self.assertEqual(len(core.lan_candidates("192.168.0.100", "192.168.0.20")), 252)
+        self.assertEqual(core.lan_candidates("8.8.8.8", "81.2.3.4"), [])         # public: never scan
+        self.assertEqual(core.lan_candidates("10.11.99.1", "10.11.99.2"), [])    # the USB link
+        keys = {"192.168.0.31": "ssh-ed25519 AAAAother", "192.168.0.57": "ssh-ed25519 AAAAkey"}
+        find = lambda want: core.find_tablet(want, "192.168.0.100", open_port=lambda ip, *a: ip in keys,
+                                             key_at=keys.get, candidates=["192.168.0.31", "192.168.0.57", "192.168.0.80"])
+        self.assertEqual(find("ssh-ed25519 AAAAkey"), "192.168.0.57")
+        self.assertEqual(find("ssh-ed25519 AAAAgone"), "")  # an open SSH port with another key is not the tablet
+        self.assertEqual(find(""), "")
+
     def test_reads_the_wlan_address(self):
         self.assertEqual(core.Engine.wlan_ip(b"3: wlan0    inet 10.0.0.7/24 brd 10.0.0.255 scope global wlan0"), "10.0.0.7")
         self.assertEqual(core.Engine.wlan_ip(b""), "")
