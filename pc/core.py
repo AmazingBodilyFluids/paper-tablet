@@ -1305,6 +1305,8 @@ class Engine:
             self.cfg["mask_strip_open"] = False
             self.refresh_mapper()
             self.pick_mask("" if parts[1] == "none" else parts[1])
+        elif name == "paper" and len(parts) == 2 and parts[1] in PAPERS:  # the paper tile at the foot of the strip
+            self.set("paper", parts[1])
         elif name == "maskstrip" and len(parts) == 2:  # its corner tab
             self.set("mask_strip_open", parts[1] == "1")
         elif name == "maskinvert":  # the strip's Invert tile or an Invert mask panel button

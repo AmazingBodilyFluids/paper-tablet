@@ -234,6 +234,13 @@ class PaperAndTrace(Profiles):
         e.tablet_action("traceadjust")
         self.assertTrue(e.cfg["trace_adjust"])
 
+    def test_paper_tile_in_the_mask_strip(self):
+        e = self.engine()
+        e.tablet_action("paper squared")
+        self.assertEqual(e.cfg["paper"], "squared")
+        e.tablet_action("paper wallpaper")  # not a paper: ignored
+        self.assertEqual(e.cfg["paper"], "squared")
+
     def test_light_bar_and_light_button(self):
         e = self.engine()
         e.tablet_action("lightset 60")  # the bar under the panel: the tablet set it already

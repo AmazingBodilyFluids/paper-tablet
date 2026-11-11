@@ -1752,9 +1752,10 @@ const Scr = {
     this.text(ctx, "Invert", W / 2, 131, W - 40, 24, 24, true, invert ? "#fff" : "#000");
     this.box(ctx, 12, 176, W - 24, 70, 12, !active ? "#000" : "#fff");
     this.text(ctx, "None", W / 2, 211, W - 40, 24, 24, true, !active ? "#fff" : "#000");
+    const paperY = VH - 24 - 110;
     (c.masks || []).forEach((m, i) => {
       const y = 256 + i * (tileH + 10), on = m.id === active;
-      if (y + tileH > VH) return;
+      if (y + tileH > paperY - 10) return;
       ctx.fillStyle = "#fff"; ctx.fillRect(12, y, W - 24, thumbH);
       const bw = on ? 7 : 2;
       ctx.strokeStyle = "#000"; ctx.lineWidth = bw; ctx.strokeRect(12 + bw / 2, y + bw / 2, W - 24 - bw, thumbH - bw);
@@ -1763,6 +1764,16 @@ const Scr = {
       ctx.fillStyle = on ? "#000" : "#fff"; roundRect(ctx, 12, y + thumbH + 4, W - 24, 38, 8); ctx.fill();
       this.text(ctx, m.name, W / 2, y + thumbH + 23, W - 24, 21, 21, true, on ? "#fff" : "#000");
     });
+    // the paper selector at its foot, as the tablet draws it
+    const names = { plain: "Plain", lined: "Lined", squared: "Squared", dots: "Dots", cross: "Crosses", blueprint: "Blueprint", isometric: "Isometric" };
+    this.box(ctx, 12, paperY, W - 24, 110, 12, "#fff");
+    ctx.font = `bold 17px ${this.F}`; ctx.letterSpacing = "2px"; ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillStyle = "#000";
+    ctx.fillText("PAPER", W / 2, paperY + 12);
+    ctx.letterSpacing = "0px"; ctx.font = `26px ${this.F}`;
+    ctx.textAlign = "start"; ctx.fillText("\u25C0", 22, paperY + 48);
+    ctx.textAlign = "end"; ctx.fillText("\u25B6", W - 22, paperY + 48);
+    ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
+    this.text(ctx, names[c.paper] || c.paper, W / 2, paperY + 66, W - 104, 23, 14, true, "#000");
     ctx.restore();
   },
   stripTab(ctx, L) {  // a half-shaded square in the corner away from the panel

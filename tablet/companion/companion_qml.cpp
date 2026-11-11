@@ -115,6 +115,11 @@ Window {
     function stripPick(p) {  // the corner tab, Invert, None, then a thumbnail and name per mask
         if (stripTabHit(p)) { stripOpen = !stripOpen; act("maskstrip " + (stripOpen ? 1 : 0)); return }
         if (p.y >= 96 && p.y < 166) { act("maskinvert"); return }  // the strip stays open to show it
+        if (p.y >= paperTileY && p.y < paperTileY + paperTileH) {  // the paper: left half back, right half on
+            var k = papers.indexOf(paper), n = papers.length
+            act("paper " + papers[((k < 0 ? 0 : k) + (p.x < stripX + stripW / 2 ? n - 1 : 1)) % n])
+            return
+        }
         var id = null
         if (p.y >= 176 && p.y < 246) id = "none"
         else if (p.y >= stripTop) {
@@ -123,6 +128,12 @@ Window {
         }
         if (id !== null) { stripOpen = false; act("maskpick " + id) }  // picked: the strip folds away
     }
+    // the paper selector at the foot of the strip, in the PC's order (core.PAPERS)
+    readonly property var papers: ["plain", "lined", "squared", "dots", "cross", "blueprint", "isometric"]
+    readonly property var paperNames: ({ plain: "Plain", lined: "Lined", squared: "Squared", dots: "Dots",
+                                         cross: "Crosses", blueprint: "Blueprint", isometric: "Isometric" })
+    readonly property real paperTileH: 110
+    readonly property real paperTileY: view.height - 24 - paperTileH
     property bool maskOn: false
     property bool maskInvert: false
     property int profileCount: 1
@@ -829,7 +840,7 @@ Window {
                 Item {
                     property bool on: modelData.id === win.maskActive
                     x: 12; y: win.stripTop + index * (win.stripTileH + 10); width: parent.width - 24; height: win.stripTileH
-                    visible: y + height <= view.height
+                    visible: y + height <= win.paperTileY - 10
                     Rectangle { width: parent.width; height: win.stripThumbH; color: "white"
                                 border.width: parent.on ? 7 : 2; border.color: "black" }
                     Image { x: 4; y: 4; width: parent.width - 8; height: win.stripThumbH - 8
@@ -840,6 +851,17 @@ Window {
                            horizontalAlignment: Text.AlignHCenter; text: modelData.name; elide: Text.ElideRight
                            font.pixelSize: 21; font.bold: true; color: parent.on ? "white" : "black" }
                 }
+            }
+            Rectangle {  // Paper: the pattern under the ink; tap the left half for the previous one, the right half for the next
+                x: 12; y: win.paperTileY; width: parent.width - 24; height: win.paperTileH; radius: 12
+                color: "white"; border.width: 3; border.color: "black"
+                Text { x: 0; y: 12; width: parent.width; horizontalAlignment: Text.AlignHCenter; text: "PAPER"
+                       font.pixelSize: 17; font.bold: true; font.letterSpacing: 2; color: "black" }
+                Text { x: 10; y: 46; text: "\u25C0"; font.pixelSize: 26; color: "black" }
+                Text { x: parent.width - 10 - width; y: 46; text: "\u25B6"; font.pixelSize: 26; color: "black" }
+                Text { x: 40; y: 46; width: parent.width - 80; height: 40; horizontalAlignment: Text.AlignHCenter
+                       verticalAlignment: Text.AlignVCenter; text: win.paperNames[win.paper] || win.paper
+                       font.pixelSize: 23; font.bold: true; fontSizeMode: Text.HorizontalFit; minimumPixelSize: 14; color: "black" }
             }
         }
 
